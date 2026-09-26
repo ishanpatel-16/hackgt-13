@@ -244,11 +244,41 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
 .geo-legend { position: absolute; bottom: 22px; left: 12px; z-index: 800; max-width: calc(100% - 75px); padding: 7px 10px; border-radius: 5px; background: #1a232deF; font-size: .7rem; pointer-events: none; }
 .geo-legend span { display: block; color: var(--muted); font-size: .65rem; }
 .geo-warning { position: absolute; top: 83px; left: 16px; right: 16px; z-index: 800; background: #442d26; padding: 10px; border-radius: 7px; font-size: .8rem; }
-.geo-marker { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: 2px solid #10161d; cursor: pointer; font-weight: 800; font-size: 20px; }
-.geo-marker svg { width: 18px; height: 18px; display: block; pointer-events: none; }
+.geo-marker {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 50%;
+  border: 2px solid #10161d;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: inherit;
+  padding: 0;
+  box-sizing: border-box;
+  transition: outline-color .15s ease, box-shadow .15s ease;
+}
+.leaflet-container .geo-marker-host.leaflet-marker-icon {
+  width: var(--pin-size, 36px) !important;
+  height: var(--pin-size, 36px) !important;
+  margin-left: calc(var(--pin-size, 36px) / -2) !important;
+  margin-top: calc(var(--pin-size, 36px) / -2) !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+.geo-marker svg { width: 55%; height: 55%; display: block; pointer-events: none; }
 .geo-marker.sos { background: var(--incident-color, #cf7070); color: #10161d; }
 .geo-marker.sos.new { border-color: #e6eaf0; }
-.geo-marker.chosen { outline: 3px solid #e8eef2; outline-offset: 4px; }
+.geo-marker.chosen,
+.geo-marker.cluster-linked,
+.geo-marker.pin-highlight {
+  outline: 3px solid #ffffff !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 10px rgba(255, 255, 255, 0.35);
+  z-index: 2;
+}
 .geo-marker.device { width: 28px; height: 28px; margin: 4px; border-radius: 6px; font-size: 16px; background: #243a32; color: #b5d9c4; border: 1px solid #709484; }
 .geo-marker.device.offline { background: #522e30; color: #ffc3bb; border-style: dashed; }
 .geo-marker.device.offline::after { content: '×'; position: absolute; top: -6px; right: -3px; background: #522e30; border-radius: 50%; padding: 0 3px; }
@@ -262,6 +292,16 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
 .cluster-popup-content em { color: #8ea5aa; font-size: .62rem; line-height: 1.3; }
 .cluster-popup .leaflet-popup-content-wrapper, .cluster-popup .leaflet-popup-tip { background: #18262c; color: #e8f1f0; }
 .cluster-popup .leaflet-popup-content { margin: 10px 12px; }
+/* Heat is visual-only — clicks pass through to cluster hit targets and SOS markers.
+   Screen blend pops blue/cyan/yellow/orange/red on the dark basemap without washing tiles. */
+.leaflet-heatmap-layer {
+  pointer-events: none;
+  opacity: 0.95;
+  mix-blend-mode: screen;
+  /* Match Leaflet zoom-animated layers — heat's stock 50% 50% origin breaks zoomanim. */
+  transform-origin: 0 0;
+}
+.cluster-heat-hit { cursor: pointer; }
 .street-name { display: none; }
 .geo-label { display: none; }
 .leaflet-control-zoom a { background: #24323e; color: #e8eef2; border-color: #42515d; }
