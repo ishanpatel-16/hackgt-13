@@ -1,0 +1,4 @@
+.pio/
+.vscode/
+# HTTPS private key + cert: generate with scripts/make_cert.sh, never commit
+data/*.pem

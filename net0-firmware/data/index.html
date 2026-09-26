@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>net0 emergency report</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>net0 Emergency Report</h1>
+  <p class="sub">No internet needed. Your report is relayed to responders.</p>
+
+  <form id="report" method="POST" action="/send">
+    <label for="location">Where are you?</label>
+    <input id="location" name="location" maxlength="63" placeholder="e.g. Klaus, Floor 3" required>
+    <div id="gps" class="gps">Checking GPS...</div>
+
+    <label for="message">What's happening?</label>
+    <textarea id="message" name="message" maxlength="399" placeholder="How many people, injuries, hazards..." required></textarea>
+    <div class="count"><span id="count">0</span>/399</div>
+
+    <button id="send" type="submit">Send report</button>
+  </form>
+
+  <div id="result" class="result" hidden></div>
+
+  <p class="uid">Your user ID: <span id="user-id">-</span></p>
+
+  <script src="/app.js"></script>
+</body>
+</html>
