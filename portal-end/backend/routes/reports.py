@@ -70,10 +70,14 @@ def _ensure_user(db: Session, user_id: int, name: str = "", phone: str = ""):
 def list_reports(
     user_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
+    sort: str = Query("created_at"),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Report).order_by(Report.created_at.desc())
+    if sort == "priority":
+        q = db.query(Report).order_by(Report.ai_priority.desc().nullslast(), Report.created_at.desc())
+    else:
+        q = db.query(Report).order_by(Report.created_at.desc())
     if user_id is not None:
         q = q.filter(Report.user_id == user_id)
     if status is not None:
@@ -99,7 +103,9 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db)):
     existing = db.query(Report).filter(Report.msg_id == payload.msg_id).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"msg_id {payload.msg_id} already exists (id={existing.id})")
-    _ensure_user(db, payload.user_id, payload.name, payload.phone)
+    user = _ensure_user(db, payload.user_id, payload.name, payload.phone)
+    if user.origin is None:
+        user.origin = payload.origin
     now = datetime.now(timezone.utc)
     report = Report(
         msg_id=payload.msg_id,

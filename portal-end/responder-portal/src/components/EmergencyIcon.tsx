@@ -13,4 +13,3 @@ export default function EmergencyIcon({ type }: { type: Emergency }) {
     </svg>
   )
 }
-

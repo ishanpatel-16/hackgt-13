@@ -28,13 +28,14 @@ export interface ApiReport {
   ai_category?: number | null
   ai_summary?: string | null
   ai_responders?: string[] | null
+  cluster_id?: string | null
   created_at?: string | null
   acked_at?: string | null
   user?: ApiReportUser | null
 }
 
-export function listReports(limit = 500): Promise<ApiReport[]> {
-  return request(`/api/reports?limit=${limit}`)
+export function listReports(limit = 500, sort: 'created_at' | 'priority' = 'created_at'): Promise<ApiReport[]> {
+  return request(`/api/reports?limit=${limit}&sort=${sort}`)
 }
 
 export function updateReport(

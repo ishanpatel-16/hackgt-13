@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,14 @@ from schemas.ai import (
     ProcessResultOut,
     PromptOut,
     PromptUpdate,
+)
+from ai.agent import build_brief, build_plan, send_check_in
+from schemas.agent import (
+    AgentBriefOut,
+    AgentRunIn,
+    AgentRunOut,
+    CheckInPreviewIn,
+    CheckInSendIn,
 )
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -82,3 +92,54 @@ def get_prompt(name: str):
 def update_prompt(name: str, payload: PromptUpdate):
     prompt_store.save(name, payload.content)
     return PromptOut(name=name, content=payload.content)
+
+
+@router.post("/agent/run", response_model=AgentRunOut)
+def run_agent(payload: AgentRunIn, db: Session = Depends(get_db)):
+    responder_position = (
+        (payload.responder_lat, payload.responder_lon)
+        if payload.responder_lat is not None and payload.responder_lon is not None
+        else None
+    )
+    plan = build_plan(db, payload.report_id, responder_position, payload.responder_route)
+    brief = build_brief(db)
+    return AgentRunOut(
+        plan=plan,
+        brief=brief,
+        processed_reports=db.query(Report).count(),
+        status="ok" if os.getenv("GEMINI_API_KEY", "").strip() else "fallback",
+    )
+
+
+@router.get("/brief", response_model=AgentBriefOut)
+def get_agent_brief(db: Session = Depends(get_db)):
+    return build_brief(db)
+
+
+@router.get("/rescue-plan/{report_id}", response_model=AgentRunOut)
+def get_rescue_plan(report_id: int, db: Session = Depends(get_db)):
+    return AgentRunOut(
+        plan=build_plan(db, report_id),
+        brief=build_brief(db),
+        processed_reports=db.query(Report).count(),
+        status="ok" if os.getenv("GEMINI_API_KEY", "").strip() else "fallback",
+    )
+
+
+@router.post("/check-in/preview")
+def preview_check_in(payload: CheckInPreviewIn, db: Session = Depends(get_db)):
+    plan = build_plan(db, payload.report_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"report_id": payload.report_id, "text": plan.draft, "requires_approval": True}
+
+
+@router.post("/check-in/send")
+def send_agent_check_in(payload: CheckInSendIn, db: Session = Depends(get_db)):
+    try:
+        message = send_check_in(db, payload.report_id, payload.text, payload.approved)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"message_id": message.id, "status": message.status, "text": message.text}

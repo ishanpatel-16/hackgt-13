@@ -55,6 +55,8 @@ export interface Incident {
   respondersReady?: boolean
   /** Matches backend `ai_priority`. Null until AI writes it. */
   priority: AiPriority | null
+  /** Backend cluster id when Agent Mode groups nearby reports. */
+  clusterId?: string
   lat?: number | null
   lon?: number | null
   gpsAccuracy?: number | null

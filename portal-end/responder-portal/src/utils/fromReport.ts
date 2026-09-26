@@ -113,6 +113,7 @@ export function reportToIncident(report: ApiReport, roles: Map<number, number>):
     aiResponders: mapResponders(report.ai_responders),
     respondersReady: Array.isArray(report.ai_responders),
     priority: mapPriority(report.ai_priority),
+    clusterId: report.cluster_id?.trim() || undefined,
     lat,
     lon,
     gpsAccuracy: report.gps_accuracy == null || !Number.isFinite(report.gps_accuracy) ? null : report.gps_accuracy,

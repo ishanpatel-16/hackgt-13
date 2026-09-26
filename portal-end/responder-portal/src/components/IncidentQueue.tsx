@@ -21,6 +21,7 @@ interface Props {
   onOpenMessages: (userId: number) => void
   notice?: string | null
   emptyMessage?: string
+  agentMode?: boolean
 }
 
 export default function IncidentQueue({
@@ -37,6 +38,7 @@ export default function IncidentQueue({
   onOpenMessages,
   notice = null,
   emptyMessage = 'No reports match these filters.',
+  agentMode = false,
 }: Props) {
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
   const [sort, setSort] = useState<IncidentSort>('arrival')
@@ -48,8 +50,8 @@ export default function IncidentQueue({
   const now = useNow()
 
   const groups = useMemo(
-    () => sortGroups(groupByUser(filteredIncidents), sort),
-    [filteredIncidents, sort],
+    () => sortGroups(groupByUser(filteredIncidents), agentMode ? 'priority' : sort),
+    [agentMode, filteredIncidents, sort],
   )
 
   const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
@@ -134,50 +136,63 @@ export default function IncidentQueue({
           <h2 id="queue-heading">Incidents</h2>
           <div className="queue-heading-actions">
             <span className="small-label">{filteredIncidents.length} reports</span>
-            <div className="sort-menu" ref={sortMenuRef}>
-              <button
-                type="button"
-                className={`sort-toggle ${sortOpen ? 'open' : ''}`}
-                aria-label="Sort incidents"
-                aria-haspopup="menu"
-                aria-expanded={sortOpen}
-                title="Sort"
-                onClick={() => setSortOpen(open => !open)}
-              >
-                <SortIcon />
-              </button>
-              {sortOpen && (
-                <div className="sort-dropdown" role="menu">
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={sort === 'arrival'}
-                    className={sort === 'arrival' ? 'active' : ''}
-                    onClick={() => {
-                      setSort('arrival')
-                      setSortOpen(false)
-                    }}
-                  >
-                    Arrival time
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={sort === 'priority'}
-                    className={sort === 'priority' ? 'active' : ''}
-                    onClick={() => {
-                      setSort('priority')
-                      setSortOpen(false)
-                    }}
-                  >
-                    Priority
-                  </button>
-                </div>
-              )}
-            </div>
+            {!agentMode && (
+              <div className="sort-menu" ref={sortMenuRef}>
+                <button
+                  type="button"
+                  className={`sort-toggle ${sortOpen ? 'open' : ''}`}
+                  aria-label="Sort incidents"
+                  aria-haspopup="menu"
+                  aria-expanded={sortOpen}
+                  title="Sort"
+                  onClick={() => setSortOpen(open => !open)}
+                >
+                  <SortIcon />
+                </button>
+                {sortOpen && (
+                  <div className="sort-dropdown" role="menu">
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sort === 'arrival'}
+                      className={sort === 'arrival' ? 'active' : ''}
+                      onClick={() => {
+                        setSort('arrival')
+                        setSortOpen(false)
+                      }}
+                    >
+                      Arrival time
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sort === 'priority'}
+                      className={sort === 'priority' ? 'active' : ''}
+                      onClick={() => {
+                        setSort('priority')
+                        setSortOpen(false)
+                      }}
+                    >
+                      Priority
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
+        {agentMode ? (
+          <div className="agent-queue-banner" role="status">
+            <span className="agent-banner-spark" aria-hidden>
+              ✦
+            </span>
+            <span>
+              <strong>Agent triage active</strong> · highest-risk reports first
+            </span>
+          </div>
+        ) : (
+          <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
+        )}
         {notice ? (
           <p className="connection-note" role="status">
             {notice}
