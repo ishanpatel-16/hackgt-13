@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ai.cluster import cluster_reports
+from ai.cluster import load_clusters
 from ai.llm import call_llm, gemini_configured, parse_llm_json
 from ai import prompts as prompt_store
 from ai.process import apply_result_to_report, process_packet
@@ -183,7 +183,7 @@ def build_plan(
     if ensure_ai:
         ensure_report_ai(db)
     if groups is None:
-        groups = cluster_reports(db)
+        groups = load_clusters(db)
     all_reports = db.query(Report).all()
     if not all_reports:
         return None
@@ -249,7 +249,7 @@ def build_brief(
     if ensure_ai:
         ensure_report_ai(db)
     if groups is None:
-        groups = cluster_reports(db)
+        groups = load_clusters(db)
     reports = db.query(Report).order_by(Report.created_at.desc()).all()
     network = _network(db)
     if not reports:

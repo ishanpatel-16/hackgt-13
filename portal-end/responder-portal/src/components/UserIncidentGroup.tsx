@@ -102,25 +102,23 @@ function ReportRow({
       aria-pressed={selected}
       onClick={onSelect}
     >
-      <span className="report-row-top">
-        {report.status === 'NEW' ? (
-          <span className="report-status new">NEW</span>
-        ) : (
-          <span className="report-status-spacer" aria-hidden />
-        )}
-        <span className="report-body">
-          <span className="report-place">{report.placeName || report.location || 'Location not provided'}</span>
+      {report.status === 'NEW' && <span className="report-status new">NEW</span>}
+      <span className="report-main">
+        <span className="report-row-top">
+          <span className="report-body">
+            <span className="report-place">{report.placeName || report.location || 'Location not provided'}</span>
+          </span>
+          <PriorityMeter level={report.priority} />
+          <span className="report-age" title={formatClock(report.arrivedAt) || undefined}>
+            {formatRelativeTime(report.arrivedAt, now)}
+          </span>
         </span>
-        <PriorityMeter level={report.priority} />
-        <span className="report-age" title={formatClock(report.arrivedAt) || undefined}>
-          {formatRelativeTime(report.arrivedAt, now)}
-        </span>
+        {report.aiResponders.length > 0 ? (
+          <ResponderPills responders={report.aiResponders} className="report-pills" />
+        ) : report.respondersReady === false ? (
+          <span className="ai-pending-label">AI pending</span>
+        ) : null}
       </span>
-      {report.aiResponders.length > 0 ? (
-        <ResponderPills responders={report.aiResponders} className="report-pills" />
-      ) : report.respondersReady === false ? (
-        <span className="ai-pending-label">AI pending</span>
-      ) : null}
     </button>
   )
 }

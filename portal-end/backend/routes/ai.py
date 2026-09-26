@@ -16,7 +16,7 @@ from schemas.ai import (
     PromptUpdate,
 )
 from ai.agent import build_brief, build_plan, ensure_report_ai, send_check_in
-from ai.cluster import cluster_reports
+from ai.cluster import load_clusters
 from ai.llm import gemini_configured
 from schemas.agent import (
     AgentBriefOut,
@@ -102,7 +102,7 @@ def run_agent(payload: AgentRunIn, db: Session = Depends(get_db)):
         else None
     )
     ensure_report_ai(db)
-    groups = cluster_reports(db)
+    groups = load_clusters(db)
     plan = build_plan(
         db,
         payload.report_id,

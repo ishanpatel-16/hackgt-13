@@ -155,11 +155,29 @@ def _parse_clusters(raw: str, reports: list[Report]) -> list[dict[str, Any]]:
     return cleaned
 
 
+def load_clusters(db: Session) -> dict[str, list[Report]]:
+    """Read persisted cluster assignments — no Gemini call."""
+    reports = (
+        db.query(Report)
+        .filter(Report.cluster_id.isnot(None))
+        .order_by(Report.created_at.asc(), Report.id.asc())
+        .all()
+    )
+    groups: dict[str, list[Report]] = {}
+    for report in reports:
+        cluster_id = report.cluster_id
+        if not cluster_id:
+            continue
+        groups.setdefault(cluster_id, []).append(report)
+    return {cluster_id: members for cluster_id, members in groups.items() if len(members) >= 2}
+
+
 def cluster_reports(db: Session) -> dict[str, list[Report]]:
     """
-    Cluster reports with Gemini using GPS/location context.
+    Recluster all reports with Gemini (writes cluster_id / summary / responders).
 
-    Persists cluster_id, cluster_summary, and cluster_responders on each member.
+    Call only when the report set changes (new SOS / startup baseline).
+    Prefer load_clusters() for reads.
     """
     reports = db.query(Report).order_by(Report.created_at.asc(), Report.id.asc()).all()
     if not reports:
