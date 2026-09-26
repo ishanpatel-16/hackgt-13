@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from 'react'
 import type { AiResponder } from '../types/incident'
 import { AI_RESPONDERS, RESPONDER_LABEL, RESPONDER_SHORT } from '../utils/responders'
@@ -9,6 +9,9 @@ interface Props {
 }
 
 export default function ResponderFilter({ selected, onChange }: Props) {
+  const [showMore, setShowMore] = useState(false)
+  const common = ['medical_ems', 'fire_rescue']
+  const extraSelected = selected.filter(responder => !common.includes(responder)).length
   const allActive = selected.length === 0
   const barRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
@@ -85,7 +88,7 @@ export default function ResponderFilter({ selected, onChange }: Props) {
   return (
     <div
       ref={barRef}
-      className="filter-bar"
+      className={`filter-bar ${showMore ? 'filters-expanded' : ''}`}
       role="toolbar"
       aria-label="Filter by responder type"
       onPointerDown={onPointerDown}
@@ -102,7 +105,7 @@ export default function ResponderFilter({ selected, onChange }: Props) {
       >
         All
       </button>
-      {AI_RESPONDERS.map(responder => {
+      {AI_RESPONDERS.filter(responder => showMore || common.includes(responder)).map(responder => {
         const active = selected.includes(responder)
         return (
           <button
@@ -117,6 +120,9 @@ export default function ResponderFilter({ selected, onChange }: Props) {
           </button>
         )
       })}
+      <button type="button" className={`filter-chip ${extraSelected ? 'active' : ''}`} aria-expanded={showMore} onClick={() => setShowMore(current => !current)}>
+        {showMore ? 'Less' : 'More'}{extraSelected > 0 ? ` (${extraSelected})` : ''}
+      </button>
     </div>
   )
 }

@@ -28,9 +28,10 @@ export default function UserIncidentGroupRow({
 }: Props) {
   const name = displayName(group.userId, group.userName)
   const age = groupAgeLabel(group, now)
+  const preview = group.reports.find(report => report.id === selectedId) ?? group.reports[0]
 
   return (
-    <div className={`user-group ${expanded ? 'open' : ''} ${messaging ? 'messaging' : ''}`}>
+    <div className={`user-group ${expanded ? 'open' : ''} ${messaging ? 'messaging' : ''} ${group.reports.some(report => report.id === selectedId) ? 'has-selection' : ''}`}>
       <div className="user-row">
         <button type="button" className="user-row-main" onClick={onToggle} aria-expanded={expanded}>
           <span className={`user-chevron ${expanded ? 'open' : ''}`} aria-hidden>
@@ -38,18 +39,21 @@ export default function UserIncidentGroupRow({
           </span>
           <span className="user-identity">
             <strong>{name}</strong>
-            <span className="user-meta">
-              {group.reports.length} {group.reports.length === 1 ? 'report' : 'reports'}
-              {age ? ` · ${age}` : ''}
+            <span className="user-scan-line">
+              <span>{preview.type} · {preview.placeName ?? preview.location}</span>
+              <time>{age}</time>
             </span>
-            <span className="user-priority-row">
-              <PriorityMeter level={group.maxPriority} />
-              <ResponderPills responders={group.responders} className="user-pills" />
-            </span>
+            {expanded && <>
+              <span className="user-meta">{group.reports.length} {group.reports.length === 1 ? 'report' : 'reports'}</span>
+              <span className="user-priority-row">
+                <PriorityMeter level={group.maxPriority} />
+                <ResponderPills responders={group.responders} className="user-pills" />
+              </span>
+            </>}
           </span>
           {group.hasNew && <span className="user-status new">NEW</span>}
         </button>
-        <button
+        {expanded && <button
           type="button"
           className={`user-message-btn ${messaging ? 'active' : ''}`}
           aria-label={`Message ${name}`}
@@ -60,7 +64,7 @@ export default function UserIncidentGroupRow({
           }}
         >
           <MessageIcon />
-        </button>
+        </button>}
       </div>
       {expanded && (
         <div className="user-reports">
@@ -99,18 +103,13 @@ function ReportRow({
       onClick={onSelect}
     >
       <span className="report-row-top">
-        {report.status === 'NEW' ? (
-          <span className="report-status new">NEW</span>
-        ) : (
-          <span className="report-status-spacer" aria-hidden />
-        )}
-        <span className="report-body">
-          <span className="report-place">{report.placeName ?? report.location}</span>
-        </span>
-        <PriorityMeter level={report.priority} />
-        <span className="report-age">{formatRelativeTime(report.arrivedAt, now)}</span>
+        <strong className="report-primary">{report.type}</strong>
+        <span className={`report-status ${report.status.toLowerCase()}`}>{report.status}</span>
       </span>
-      <ResponderPills responders={report.aiResponders} className="report-pills" />
+      <span className="report-location">{report.placeName ?? report.location}</span>
+      <span className="report-scan-meta">
+        {report.people} {report.people === 1 ? 'person' : 'people'} · {formatRelativeTime(report.arrivedAt, now)}
+      </span>
     </button>
   )
 }

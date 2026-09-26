@@ -205,11 +205,19 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
           style: feature => {
             const p = feature?.properties
             if (p?.highway) {
-              return { color: '#a8b8c6', weight: p.highway === 'footway' || p.highway === 'path' ? 0.9 : 1.3, opacity: 0.6, fillOpacity: 0 }
+              // Geography is context: major streets lead, local roads and paths recede.
+              const major = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary'].includes(p.highway)
+              const path = ['footway', 'path', 'steps', 'cycleway', 'pedestrian'].includes(p.highway)
+              return {
+                color: major ? '#626c76' : path ? '#39434b' : '#4b5660',
+                weight: major ? 1.3 : path ? 0.55 : 0.8,
+                opacity: major ? 0.5 : path ? 0.22 : 0.32,
+                fillOpacity: 0,
+              }
             }
             return p?.leisure
-              ? { color: '#7aa98c', weight: 1, fillColor: '#294638', fillOpacity: 0.65 }
-              : { color: '#8c9baa', weight: 0.7, fillColor: '#394653', fillOpacity: 0.8 }
+              ? { color: '#34473d', weight: 0.6, opacity: 0.4, fillColor: '#203129', fillOpacity: 0.45 }
+              : { color: '#505d69', weight: 0.55, opacity: 0.45, fillColor: '#29343f', fillOpacity: 0.75 }
           },
         }).addTo(map)
       })
@@ -244,9 +252,9 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
         radius: cluster.radius,
         color,
         weight: 2,
-        opacity: 0.9,
+        opacity: 0.7,
         fillColor: color,
-        fillOpacity: cluster.critical ? 0.14 : 0.12,
+        fillOpacity: cluster.critical ? 0.045 : 0.03,
         dashArray: cluster.critical ? '8 6' : '5 7',
         interactive: true,
       }).bindPopup(clusterPopup(cluster), { className: 'cluster-popup' }).addTo(clusters)
@@ -374,14 +382,14 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
     L.polyline(routePath, {
       color: '#8de0af',
       weight: 5,
-      opacity: 0.18,
+      opacity: 0.12,
       lineCap: 'round',
       lineJoin: 'round',
     }).addTo(routeLayer)
     L.polyline(routePath, {
       color: '#b8f2c5',
       weight: 2,
-      opacity: 0.95,
+      opacity: 0.85,
       dashArray: '8 9',
       lineCap: 'round',
       lineJoin: 'round',
@@ -462,6 +470,9 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
         </svg>
       </button>
       {mapError && <p className="geo-warning">Local map could not load. Emergency markers remain available.</p>}
+      <details className="map-info">
+        <summary>Map info</summary>
+        <div className="map-info-content">
       {route?.length || incidents.some(incident => incident.id === selectedId && coordinates(incident)) ? (
         <div className="map-route-legend" aria-label="Responder route legend">
           <span className="map-route-line" />
@@ -476,6 +487,8 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
           <strong>{clusterCount} AI-linked area{clusterCount === 1 ? '' : 's'}</strong>
         </div>
       )}
+        </div>
+      </details>
     </section>
   )
 }

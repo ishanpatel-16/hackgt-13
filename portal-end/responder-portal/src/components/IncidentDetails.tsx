@@ -6,6 +6,7 @@ import EmergencyIcon from './EmergencyIcon'
 import { useRelativeTime } from '../hooks/useRelativeTime'
 import PriorityMeter from './PriorityMeter'
 import DispatchPanel from './DispatchPanel'
+import ResponderPills from './ResponderPills'
 
 export default function IncidentDetails({
   incident,
@@ -25,45 +26,29 @@ export default function IncidentDetails({
         <h2 id="details-heading">Incident Details</h2>
       </div>
       <div className="details-body">
-        <div className="incident-top">
-          <span className="incident-id">SOS / {incident.id}</span>
-          {isNew ? (
-            <span className="incident-status new" role="status">
-              NEW
-            </span>
-          ) : null}
-        </div>
         <div className="detail-emergency">
           <span className="emergency-icon">
             <EmergencyIcon type={incident.type} />
           </span>
           <h3>{incident.type}</h3>
+          <span className={`incident-status ${incident.status.toLowerCase()}`} role="status">{incident.status}</span>
         </div>
+        <p className="detail-location">
+          <strong>{incident.placeName ?? incident.location}</strong>
+          {incident.locationDetail && <span>{incident.locationDetail}</span>}
+        </p>
         <p className="people-detail">
           <strong>{incident.people}</strong> {incident.people === 1 ? 'person' : 'people'} needing help
         </p>
-        <dl className="detail-facts">
-          <div>
-            <dt>Location</dt>
-            <dd>
-              {incident.placeName ?? incident.location}
-              <br />
-              {incident.locationDetail}
-            </dd>
-          </div>
-          <div>
-            <dt>Priority</dt>
-            <dd className="priority-detail">
-              <PriorityMeter level={incident.priority} size="md" />
-              <span>P{incident.priority}</span>
-            </dd>
-          </div>
-        </dl>
-        <h4>Primary response</h4>
-        <p className="detail-route">{getPrimaryResponse(incident.type)}</p>
+        <div className="detail-priority-line">
+          <span>Priority P{incident.priority}</span>
+          <PriorityMeter level={incident.priority} size="md" />
+        </div>
         <h4>Report</h4>
         <blockquote>“{incident.report}”</blockquote>
-        <p className="detail-route">Reported {reported}</p>
+        <h4>Primary response</h4>
+        <p className="detail-route">{getPrimaryResponse(incident.type)}</p>
+        <p className="detail-reported">Reported {reported}</p>
         <div className="detail-actions incident-detail-actions">
           {isNew && (
             <button className="acknowledge-button" onClick={() => onAcknowledge(incident.id)}>
@@ -82,18 +67,24 @@ export default function IncidentDetails({
             Dispatch
           </button>
         </div>
-        <dl className="detail-facts">
-          <div>
-            <dt>Received via</dt>
-            <dd>Access Point {incident.node}</dd>
-          </div>
-          <div>
-            <dt>Coordinates</dt>
-            <dd>{incident.location}</dd>
-          </div>
-        </dl>
-        <h4>How this report reached us</h4>
-        <p className="detail-route">{incident.path.map(deviceName).join(' → ')}</p>
+        <details className="incident-technical">
+          <summary>Technical details</summary>
+          <p className="incident-id">SOS / {incident.id}</p>
+          <dl className="detail-facts">
+            <div>
+              <dt>Received via</dt>
+              <dd>Access Point {incident.node}</dd>
+            </div>
+            <div>
+              <dt>Coordinates</dt>
+              <dd>{incident.location}</dd>
+            </div>
+          </dl>
+          <h4>How this report reached us</h4>
+          <p className="detail-route">{incident.path.map(deviceName).join(' → ')}</p>
+          <h4>Suggested services</h4>
+          <ResponderPills responders={incident.aiResponders} />
+        </details>
         {showReports && (
           <div id="source-reports" className="source-reports">
             <h4>Source Report · 1</h4>
