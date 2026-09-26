@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -17,6 +17,7 @@ class User(Base):
     user_id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(NAME_MAX), default="")
     phone: Mapped[str] = mapped_column(String(PHONE_MAX), default="")
+    origin: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

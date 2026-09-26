@@ -178,6 +178,7 @@ def _handle_report(
         user_id=pkt.user_id,
         name=pkt.name,
         phone=pkt.phone,
+        origin=pkt.origin,
     )
 
     existing = (
@@ -253,6 +254,7 @@ def _handle_user_reply(
     _upsert_user(
         db,
         user_id=pkt.user_id,
+        origin=pkt.origin,
     )
 
     existing = (
@@ -307,6 +309,7 @@ def _upsert_user(
     user_id: int,
     name: str = "",
     phone: str = "",
+    origin: int | None = None,
 ) -> User:
 
     user = db.get(User, user_id)
@@ -317,6 +320,7 @@ def _upsert_user(
             user_id=user_id,
             name=name,
             phone=phone,
+            origin=origin,
             first_seen=utcnow(),
             last_seen=utcnow(),
         )
@@ -330,6 +334,9 @@ def _upsert_user(
 
     if phone:
         user.phone = phone
+
+    if origin is not None:
+        user.origin = origin
 
     user.last_seen = utcnow()
 
