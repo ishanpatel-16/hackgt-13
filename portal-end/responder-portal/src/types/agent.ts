@@ -6,7 +6,6 @@ export interface AgentModeDockProps {
   incidents: Incident[]
   selectedId: string | null
   nodes: NetworkNode[]
-  responderLive?: boolean
   plan?: RescuePlan | null
   brief?: AgentBrief | null
   loading?: boolean

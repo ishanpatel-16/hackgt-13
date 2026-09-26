@@ -41,7 +41,7 @@ function buildPlan(incident: Incident, incidents: Incident[], nodes: NetworkNode
   const coordinates = incident.location.split(',').map(Number)
   const route: RoutePoint[] = coordinates.length === 2 && coordinates.every(Number.isFinite)
     ? [
-        { lat: coordinates[0] + 0.0012, lon: coordinates[1] - 0.0012, label: 'Responder position', kind: 'responder' },
+        { lat: coordinates[0] + 0.0012, lon: coordinates[1] - 0.0012, label: 'Approach start', kind: 'waypoint' },
         { lat: coordinates[0] + 0.00076, lon: coordinates[1] - 0.00072, label: 'Confirmed approach', kind: 'waypoint' },
         { lat: coordinates[0], lon: coordinates[1], label: 'Civilian signal', kind: 'civilian' },
       ]
@@ -62,7 +62,9 @@ function buildPlan(incident: Incident, incidents: Incident[], nodes: NetworkNode
     draft: `Net0 received your ${incident.type.toLowerCase()} report at ${incident.placeName ?? incident.location}. Reply 1 if you can move, 2 if injured, or 3 if trapped.`,
     route,
     routeLabel: route.length ? 'Preferred corridor' : 'Route waiting for GPS',
-    routeNote: route.length ? 'Demo street corridor until live responder GPS is available.' : 'GPS is needed to draw the preferred street corridor.',
+    routeNote: route.length
+      ? 'Preferred street corridor toward the civilian signal; verify closures before entry.'
+      : 'A GPS-backed report is needed to draw the preferred street corridor.',
   }
 }
 
@@ -75,7 +77,6 @@ export default function AgentModeDock({
   incidents,
   selectedId,
   nodes,
-  responderLive = false,
   plan: remotePlan,
   brief,
   loading = false,
@@ -200,7 +201,7 @@ export default function AgentModeDock({
                       <span className="agent-section-label">Best path · visible on map</span>
                       <strong>{plan.routeLabel}</strong>
                     </div>
-                    <span className="agent-path-status"><i /> {plan.route.length ? (responderLive ? 'Live position' : 'Demo movement') : 'Waiting for GPS'}</span>
+                    <span className="agent-path-status"><i /> {plan.route.length ? 'Street corridor' : 'Waiting for GPS'}</span>
                   </div>
                   <div className="agent-path-steps">
                     {plan.route.length
@@ -209,7 +210,7 @@ export default function AgentModeDock({
                             <b>{index + 1}</b>{point.label}{index < plan.route.length - 1 && <em>→</em>}
                           </span>
                         ))
-                      : <span>Enable location access or select a GPS-backed report.</span>}
+                      : <span>Select a GPS-backed report to draw the preferred corridor.</span>}
                   </div>
                   <p>{plan.routeNote}</p>
                 </div>

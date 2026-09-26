@@ -129,7 +129,7 @@ def _preferred_route(
         (start[1] + destination[1]) / 2 - 0.00012,
     )
     return [
-        RoutePoint(lat=start[0], lon=start[1], label="Responder position", kind="responder"),
+        RoutePoint(lat=start[0], lon=start[1], label="Approach start", kind="waypoint"),
         RoutePoint(lat=midpoint[0], lon=midpoint[1], label="Confirmed approach", kind="waypoint"),
         RoutePoint(lat=destination[0], lon=destination[1], label="Civilian signal", kind="civilian"),
     ]

@@ -245,6 +245,7 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
 .geo-legend span { display: block; color: var(--muted); font-size: .65rem; }
 .geo-warning { position: absolute; top: 83px; left: 16px; right: 16px; z-index: 800; background: #442d26; padding: 10px; border-radius: 7px; font-size: .8rem; }
 .geo-marker { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: 2px solid #10161d; cursor: pointer; font-weight: 800; font-size: 20px; }
+.geo-marker svg { width: 18px; height: 18px; display: block; pointer-events: none; }
 .geo-marker.sos { background: var(--incident-color, #cf7070); color: #10161d; }
 .geo-marker.sos.new { border-color: #e6eaf0; }
 .geo-marker.chosen { outline: 3px solid #e8eef2; outline-offset: 4px; }
@@ -290,67 +291,6 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
 .cluster-popup-content ul { display: grid; gap: 5px; margin: 2px 0 0; padding-left: 16px; color: #d2dfdf; font-size: .7rem; line-height: 1.35; }
 .cluster-popup-content em { color: #8ea5aa; font-size: .62rem; line-height: 1.3; }
 .cluster-popup .leaflet-popup-content-wrapper, .cluster-popup .leaflet-popup-tip { background: #18262c; color: #e8f1f0; }
-.responder-marker-host { background: transparent; border: 0; }
-.responder-marker {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 2px solid #07131a;
-  border-radius: 50%;
-  background: #8de0af;
-  box-shadow: 0 0 0 5px #8de0af2b, 0 0 24px #8de0afaa;
-  animation: responder-pulse 1.45s ease-in-out infinite;
-}
-.responder-marker::before { content: '✦'; color: #0c2b1e; font-size: 17px; line-height: 1; }
-.responder-marker i { position: absolute; inset: -9px; border: 1px solid #b8f2c577; border-radius: 50%; animation: responder-ring 1.45s ease-out infinite; }
-@keyframes responder-pulse { 50% { transform: scale(1.08); box-shadow: 0 0 0 8px #8de0af20, 0 0 30px #8de0afcc; } }
-@keyframes responder-ring { 100% { transform: scale(1.55); opacity: 0; } }
-.map-route-legend {
-  position: absolute;
-  left: 50%;
-  bottom: 20px;
-  z-index: 800;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transform: translateX(-50%);
-  padding: 9px 12px;
-  border: 1px solid #6a897b;
-  border-radius: 999px;
-  background: #12221edb;
-  color: #c6d8d0;
-  font-size: .7rem;
-  box-shadow: 0 10px 28px #0008;
-  pointer-events: none;
-  white-space: nowrap;
-}
-.map-route-legend strong { color: #b8f2c5; }
-.map-route-line { width: 25px; border-top: 2px dashed #b8f2c5; }
-.map-responder-key { display: inline-flex; align-items: center; gap: 4px; color: #a6c8b1; }
-.map-responder-key i { width: 7px; height: 7px; border-radius: 50%; background: #8de0af; box-shadow: 0 0 0 3px #8de0af35; }
-.cluster-legend {
-  position: absolute;
-  right: 58px;
-  bottom: 20px;
-  z-index: 800;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
-  border: 1px solid #47565e;
-  border-radius: 8px;
-  background: #18252ddd;
-  color: #aebfc3;
-  font-size: .64rem;
-  box-shadow: 0 8px 22px #0007;
-  pointer-events: none;
-}
-.cluster-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.cluster-legend i { width: 7px; height: 7px; border-radius: 50%; background: #e7bd50; box-shadow: 0 0 0 2px #e7bd5033; }
-.cluster-legend i.critical { background: #f36d62; box-shadow: 0 0 0 2px #f36d6233; }
-.cluster-legend strong { color: #e7eceb; font-size: .65rem; font-weight: 700; }
 .street-name { display: none; }
 .geo-label { display: none; }
 .leaflet-control-zoom a { background: #24323e; color: #e8eef2; border-color: #42515d; }
@@ -543,6 +483,23 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
   overflow-x: visible;
   flex: 1;
   min-height: 0;
+}
+.incident-feed {
+  scrollbar-width: thin;
+  scrollbar-color: #ffffff55 transparent;
+}
+.incident-feed::-webkit-scrollbar {
+  width: 4px;
+}
+.incident-feed::-webkit-scrollbar-track {
+  background: transparent;
+}
+.incident-feed::-webkit-scrollbar-thumb {
+  background: #ffffff55;
+  border-radius: 999px;
+}
+.incident-feed::-webkit-scrollbar-thumb:hover {
+  background: #ffffff88;
 }
 .user-reports {
   overflow: visible;

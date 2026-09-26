@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Header from './components/Header'
 import IncidentQueue from './components/IncidentQueue'
 import IncidentMap from './components/IncidentMap'
@@ -7,7 +7,7 @@ import MessagesView from './views/MessagesView'
 import AgentModeDock from './components/AgentModeDock'
 import { useLivePortal } from './hooks/useLivePortal'
 import type { AiResponder } from './types/incident'
-import type { AgentBrief, RescuePlan, RoutePoint } from './types/agent'
+import type { AgentBrief, RescuePlan } from './types/agent'
 import { filterByResponders } from './utils/groupIncidents'
 import { runAgent, sendAgentCheckIn, type AgentApiBrief, type AgentApiPlan } from './api/agent'
 import './App.css'
@@ -24,9 +24,6 @@ function App() {
   const [agentBrief, setAgentBrief] = useState<AgentBrief | null>(null)
   const [agentLoading, setAgentLoading] = useState(false)
   const [agentStatus, setAgentStatus] = useState<'ok' | 'fallback' | null>(null)
-  const [responderPosition, setResponderPosition] = useState<[number, number] | null>(null)
-  const responderPositionRef = useRef<[number, number] | null>(null)
-  const [streetRoute, setStreetRoute] = useState<RoutePoint[]>([])
 
   const filteredIncidents = useMemo(
     () => filterByResponders(incidents, selectedFilters),
@@ -47,13 +44,7 @@ function App() {
     async function refreshAgent() {
       setAgentLoading(true)
       try {
-        const result = await runAgent(
-          selectedId ? Number(selectedId) : undefined,
-          responderPositionRef.current
-            ? { lat: responderPositionRef.current[0], lon: responderPositionRef.current[1] }
-            : undefined,
-          streetRoute,
-        )
+        const result = await runAgent(selectedId ? Number(selectedId) : undefined)
         if (cancelled) return
         setAgentPlan(result.plan ? toRescuePlan(result.plan) : null)
         setAgentBrief(toAgentBrief(result.brief))
@@ -70,27 +61,10 @@ function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [agentMode, selectedId, streetRoute])
-
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    const watchId = navigator.geolocation.watchPosition(
-      position => {
-        const next: [number, number] = [position.coords.latitude, position.coords.longitude]
-        responderPositionRef.current = next
-        setResponderPosition(next)
-      },
-      () => {
-        // Keep the last known position on transient permission/signal errors.
-      },
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 8_000 },
-    )
-    return () => navigator.geolocation.clearWatch(watchId)
-  }, [])
+  }, [agentMode, selectedId])
 
   function selectIncident(id: string) {
     setSelectedId(id)
-    setStreetRoute([])
     setPeekUserId(null)
     void acknowledge(id)
   }
@@ -105,7 +79,6 @@ function App() {
       if (current == null) return current
       const visible = filterByResponders(incidents, next)
       if (visible.some(incident => incident.id === current)) return current
-      setStreetRoute([])
       return null
     })
   }
@@ -137,16 +110,6 @@ function App() {
     })
   }
 
-  const displayPlan =
-    agentPlan && streetRoute.length
-      ? {
-          ...agentPlan,
-          route: streetRoute,
-          routeLabel: 'Preferred street corridor',
-          routeNote: 'Route follows mapped streets and accessible ways; verify closures before entry.',
-        }
-      : agentPlan
-
   const emptyMessage =
     incidents.length > 0
       ? 'No reports match these filters.'
@@ -173,7 +136,6 @@ function App() {
                 onSelect={selectIncident}
                 onClearSelect={() => {
                   setSelectedId(null)
-                  setStreetRoute([])
                 }}
                 onAcknowledge={acknowledgeIncident}
                 peekUserId={peekUserId}
@@ -187,9 +149,6 @@ function App() {
                 incidents={filteredIncidents}
                 selectedId={selectedId}
                 onSelectIncident={selectIncident}
-                route={streetRoute}
-                responderPosition={responderPosition}
-                onRouteChange={setStreetRoute}
               />
             </div>
           ) : (
@@ -206,8 +165,7 @@ function App() {
         incidents={incidents}
         selectedId={selectedId}
         nodes={nodes}
-        responderLive={responderPosition != null}
-        plan={displayPlan}
+        plan={agentPlan}
         brief={agentBrief}
         loading={agentLoading}
         runStatus={agentStatus}

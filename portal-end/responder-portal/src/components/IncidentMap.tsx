@@ -3,16 +3,12 @@ import L from 'leaflet'
 import type { FeatureCollection } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import type { Incident } from '../types/incident'
-import type { RoutePoint } from '../types/agent'
-import { buildStreetGraph, findStreetRoute, routePoints, type StreetGraph } from '../utils/streetRoute'
+import { emergencyIconHtml } from './EmergencyIcon'
 
 interface Props {
   incidents: Incident[]
   selectedId: string | null
   onSelectIncident: (id: string) => void
-  route?: RoutePoint[]
-  responderPosition?: L.LatLngTuple | null
-  onRouteChange?: (route: RoutePoint[]) => void
 }
 
 interface IncidentCluster {
@@ -134,52 +130,24 @@ function markerTitle(incident: Incident): string {
   return `${incident.type} SOS ${sos}, ${people}`
 }
 
-function markerSymbol(incident: Incident): string {
-  if (incident.type === 'Medical') return '+'
-  if (incident.type === 'Fire') return '♨'
-  if (incident.type === 'Trapped') return '!'
-  if (incident.type === 'Flood') return '~'
-  if (incident.type === 'Hazmat') return '☣'
-  return '•'
-}
-
 function markerClasses(incident: Incident, selectedId: string | null): string {
   return `geo-marker sos ${incident.type.toLowerCase()} ${incident.status === 'NEW' ? 'new' : ''} ${selectedId === incident.id ? 'chosen' : ''}`.trim()
 }
 
-function routePointCoordinates(route: RoutePoint[] | undefined): L.LatLngTuple[] {
-  return (route ?? []).map(point => [point.lat, point.lon] as L.LatLngTuple)
-}
-
-function responderIcon() {
-  return L.divIcon({
-    className: 'responder-marker-host',
-    html: '<span class="responder-marker"><i></i></span>',
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
-  })
-}
-
-export default function IncidentMap({ incidents, selectedId, onSelectIncident, route, responderPosition, onRouteChange }: Props) {
+export default function IncidentMap({ incidents, selectedId, onSelectIncident }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<string, { marker: L.Marker; button: HTMLButtonElement }>>(new Map())
   const layerRef = useRef<L.LayerGroup | null>(null)
   const clusterLayerRef = useRef<L.LayerGroup | null>(null)
-  const routeLayerRef = useRef<L.LayerGroup | null>(null)
-  const responderMarkerRef = useRef<L.Marker | null>(null)
-  const routeChangeRef = useRef(onRouteChange)
-  const lastRouteSignatureRef = useRef('')
   const selectRef = useRef(onSelectIncident)
   const selectedRef = useRef(selectedId)
   const firstSelect = useRef(true)
   const didFit = useRef(false)
-  const [streetGraph, setStreetGraph] = useState<StreetGraph | null>(null)
   const [mapError, setMapError] = useState(false)
 
   selectRef.current = onSelectIncident
   selectedRef.current = selectedId
-  routeChangeRef.current = onRouteChange
 
   useEffect(() => {
     const map = L.map(host.current!, {
@@ -206,7 +174,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
 
     clusterLayerRef.current = L.layerGroup().addTo(map)
     layerRef.current = L.layerGroup().addTo(map)
-    routeLayerRef.current = L.layerGroup().addTo(map)
 
     const controller = new AbortController()
     fetch(`${import.meta.env.BASE_URL}maps/atlanta.geojson`, { signal: controller.signal })
@@ -216,7 +183,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
       })
       .then((data: FeatureCollection) => {
         if (controller.signal.aborted) return
-        setStreetGraph(buildStreetGraph(data))
         const overlay = {
           type: 'FeatureCollection' as const,
           features: data.features.filter(feature => {
@@ -252,8 +218,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
       mapRef.current = null
       layerRef.current = null
       clusterLayerRef.current = null
-      routeLayerRef.current = null
-      responderMarkerRef.current = null
       markersRef.current.clear()
     }
   }, [])
@@ -311,7 +275,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
           existing.marker.setLatLng(point)
         }
         existing.button.className = markerClasses(incident, selectedRef.current)
-        existing.button.textContent = markerSymbol(incident)
+        existing.button.innerHTML = emergencyIconHtml(incident.type)
         existing.button.title = markerTitle(incident)
         existing.button.setAttribute('aria-label', existing.button.title)
         return
@@ -320,7 +284,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
       const button = document.createElement('button')
       button.type = 'button'
       button.className = markerClasses(incident, selectedRef.current)
-      button.textContent = markerSymbol(incident)
+      button.innerHTML = emergencyIconHtml(incident.type)
       button.title = markerTitle(incident)
       button.setAttribute('aria-label', button.title)
       button.onclick = event => {
@@ -373,108 +337,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
     return () => window.cancelAnimationFrame(frame)
   }, [selectedId])
 
-  // Draw the AI's preferred responder corridor and keep the responder marker
-  // moving in demo mode when browser geolocation is unavailable.
-  useEffect(() => {
-    const map = mapRef.current
-    const routeLayer = routeLayerRef.current
-    if (!map || !routeLayer) return
-    routeLayer.clearLayers()
-    if (responderMarkerRef.current) {
-      map.removeLayer(responderMarkerRef.current)
-      responderMarkerRef.current = null
-    }
-
-    const incident = incidents.find(item => item.id === selectedId)
-      ?? [...incidents]
-        .filter(item => coordinates(item))
-        .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0))[0]
-    const suppliedPoints = routePointCoordinates(route)
-    const target = incident ? coordinates(incident) : null
-    const suppliedStart = responderPosition
-      ?? suppliedPoints[0]
-      ?? (target ? [target[0] + 0.0012, target[1] - 0.0012] as L.LatLngTuple : null)
-    const path = streetGraph && suppliedStart && target
-      ? findStreetRoute(streetGraph, suppliedStart, target)
-      : []
-    // Never fall back to a line between buildings. Until the local street
-    // graph is ready, keep the route hidden rather than showing unsafe geometry.
-    const routePath = path.length >= 2 ? path : (streetGraph ? suppliedPoints : [])
-    if (routePath.length < 2) return
-
-    const streetWaypoints = path.length >= 2 ? routePoints(path) : []
-    if (streetWaypoints.length) {
-      const signature = streetWaypoints.map(point => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')
-      const suppliedSignature = suppliedPoints.map(point => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join('|')
-      if (signature !== lastRouteSignatureRef.current || signature !== suppliedSignature) {
-        lastRouteSignatureRef.current = signature
-        routeChangeRef.current?.(streetWaypoints)
-      }
-    }
-
-    L.polyline(routePath, {
-      color: '#8de0af',
-      weight: 5,
-      opacity: 0.18,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(routeLayer)
-    L.polyline(routePath, {
-      color: '#b8f2c5',
-      weight: 2,
-      opacity: 0.95,
-      dashArray: '8 9',
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(routeLayer)
-
-    routePath.slice(1, -1).forEach(point => {
-      L.circleMarker(point, {
-        radius: 4,
-        color: '#d9f7df',
-        weight: 1,
-        fillColor: '#8de0af',
-        fillOpacity: 1,
-      }).addTo(routeLayer)
-    })
-
-    const destination = routePath[routePath.length - 1]
-    L.circleMarker(destination, {
-      radius: 10,
-      color: '#f6d48a',
-      weight: 2,
-      fillColor: '#c68b46',
-      fillOpacity: 0.22,
-    }).addTo(routeLayer)
-
-    const marker = L.marker(routePath[0], { icon: responderIcon(), zIndexOffset: 900 }).addTo(routeLayer)
-    responderMarkerRef.current = marker
-    let frame = 0
-    let progress = 0
-    let last = performance.now()
-    const animate = (now: number) => {
-      const elapsed = now - last
-      last = now
-      if (!responderPosition) {
-        progress = (progress + elapsed / 18000) % 1
-        const segmentFloat = progress * (routePath.length - 1)
-        const segment = Math.min(routePath.length - 2, Math.floor(segmentFloat))
-        const segmentProgress = segmentFloat - segment
-        const from = routePath[segment]
-        const to = routePath[segment + 1]
-        marker.setLatLng([
-          from[0] + (to[0] - from[0]) * segmentProgress,
-          from[1] + (to[1] - from[1]) * segmentProgress,
-        ])
-      } else {
-        marker.setLatLng(responderPosition)
-      }
-      frame = window.requestAnimationFrame(animate)
-    }
-    frame = window.requestAnimationFrame(animate)
-    return () => window.cancelAnimationFrame(frame)
-  }, [incidents, route, selectedId, responderPosition, streetGraph])
-
   function fitIncidents() {
     const points = incidents.flatMap(incident => {
       const point = coordinates(incident)
@@ -491,8 +353,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
     })
   }
 
-  const clusterCount = clusterIncidents(incidents).length
-
   return (
     <section className="panel map-panel geographic-panel" aria-label="Incident map">
       <div className="geo-canvas" ref={host} />
@@ -503,20 +363,6 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
         </svg>
       </button>
       {mapError && <p className="geo-warning">Local map could not load. Emergency markers remain available.</p>}
-      {route?.length || incidents.some(incident => incident.id === selectedId && coordinates(incident)) ? (
-        <div className="map-route-legend" aria-label="Responder route legend">
-          <span className="map-route-line" />
-          <span><strong>Best street route</strong> · streets + accessible ways</span>
-          <span className="map-responder-key"><i /> {responderPosition ? 'Live position' : 'Demo movement'}</span>
-        </div>
-      ) : null}
-      {clusterCount > 0 && (
-        <div className="cluster-legend" aria-label="Incident cluster legend">
-          <span><i className="watch" /> Linked reports</span>
-          <span><i className="critical" /> Critical cluster</span>
-          <strong>{clusterCount} AI-linked area{clusterCount === 1 ? '' : 's'}</strong>
-        </div>
-      )}
     </section>
   )
 }

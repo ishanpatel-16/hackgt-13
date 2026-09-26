@@ -1,5 +1,4 @@
 import { request } from './client'
-import type { RoutePoint } from '../types/agent'
 
 export interface AgentApiEvidence {
   label: string
@@ -50,15 +49,9 @@ export interface AgentRunResponse {
   status: 'ok' | 'fallback'
 }
 
-export function runAgent(
-  reportId?: number,
-  responderPosition?: { lat: number; lon: number },
-  responderRoute?: RoutePoint[],
-): Promise<AgentRunResponse> {
+export function runAgent(reportId?: number): Promise<AgentRunResponse> {
   const body = {
     ...(reportId == null ? {} : { report_id: reportId }),
-    ...(responderPosition ? { responder_lat: responderPosition.lat, responder_lon: responderPosition.lon } : {}),
-    ...(responderRoute?.length ? { responder_route: responderRoute } : {}),
   }
   return request('/api/ai/agent/run', {
     method: 'POST',
