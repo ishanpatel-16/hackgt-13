@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import Base, engine
+from sqlalchemy import inspect, text
 from models import Message, Node, Report, User  # noqa: F401
 from packets import esp_manager
 from packets.packet_handler import mark_stale_nodes_offline
@@ -41,6 +42,26 @@ logger = logging.getLogger(__name__)
 OFFLINE_SWEEP_INTERVAL = 5
 
 
+def _ensure_report_cluster_columns() -> None:
+    """Add cluster summary columns on existing SQLite DBs without a full migration."""
+    try:
+        inspector = inspect(engine)
+        columns = {column["name"] for column in inspector.get_columns("reports")}
+    except Exception:
+        return
+    statements: list[str] = []
+    if "cluster_summary" not in columns:
+        statements.append("ALTER TABLE reports ADD COLUMN cluster_summary VARCHAR(600)")
+    if "cluster_responders" not in columns:
+        statements.append("ALTER TABLE reports ADD COLUMN cluster_responders JSON")
+    if not statements:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+    logger.info("Added missing report cluster columns: %s", ", ".join(statements))
+
+
 # -- fast api --
 # lifespan
 @asynccontextmanager
@@ -50,6 +71,12 @@ async def lifespan(app: FastAPI):
 
     # create sql tables
     Base.metadata.create_all(bind=engine)
+    _ensure_report_cluster_columns()
+
+    # Baseline clustering for existing reports (does not require Agent Mode).
+    from ai.cluster import enqueue_baseline
+
+    enqueue_baseline()
 
     # start bluetooth connection
     ble_task = asyncio.create_task(

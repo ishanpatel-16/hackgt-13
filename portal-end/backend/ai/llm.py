@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,24 +21,34 @@ load_dotenv(_ENV_PATH)
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 _MAX_ATTEMPTS = 3
 _RETRY_DELAY_S = 1.5
+_client_instance = None
+_client_key: str | None = None
 
 
-@lru_cache(maxsize=1)
+def gemini_configured() -> bool:
+    load_dotenv(_ENV_PATH)
+    return bool(os.getenv("GEMINI_API_KEY", "").strip())
+
+
 def _client():
-    from google import genai
-
+    global _client_instance, _client_key
+    load_dotenv(_ENV_PATH)
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         return None
-    return genai.Client(api_key=api_key)
+    if _client_instance is None or _client_key != api_key:
+        from google import genai
+
+        _client_instance = genai.Client(api_key=api_key)
+        _client_key = api_key
+    return _client_instance
 
 
 def call_llm(prompt: str, *, system: str | None = None) -> str | None:
     """
     Send a prompt to Gemini and return raw text.
 
-    Returns None if GEMINI_API_KEY is missing or the call fails,
-    so feature modules can fall back to stub behavior.
+    Returns None if GEMINI_API_KEY is missing or the call fails.
     """
     client = _client()
     if client is None:
@@ -72,7 +81,6 @@ def call_llm(prompt: str, *, system: str | None = None) -> str | None:
             return text or None
         except genai_errors.ServerError as e:
             last_err = e
-            # 503 / high demand — brief backoff then retry
             if attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_S * attempt)
                 continue
@@ -84,3 +92,18 @@ def call_llm(prompt: str, *, system: str | None = None) -> str | None:
         "Gemini call_llm failed (model=%s)", model, exc_info=last_err
     )
     return None
+
+
+def parse_llm_json(raw: str) -> dict:
+    """Strip optional markdown fences and parse JSON object/array."""
+    import json
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:].strip()
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("LLM JSON root must be an object")
+    return payload

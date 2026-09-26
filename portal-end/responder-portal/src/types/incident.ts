@@ -57,6 +57,10 @@ export interface Incident {
   priority: AiPriority | null
   /** Backend cluster id when Agent Mode groups nearby reports. */
   clusterId?: string
+  /** Gemini summary for the whole cluster area. */
+  clusterSummary?: string | null
+  /** Responder types needed across the cluster. */
+  clusterResponders?: AiResponder[]
   lat?: number | null
   lon?: number | null
   gpsAccuracy?: number | null

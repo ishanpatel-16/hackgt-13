@@ -1,71 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { AgentEvidence, AgentModeDockProps, RescuePlan, RoutePoint } from '../types/agent'
-import type { Incident } from '../types/incident'
-import type { NetworkNode } from '../types/network'
+import { useEffect, useState } from 'react'
+import type { AgentEvidence, AgentModeDockProps } from '../types/agent'
 
 function priorityLabel(priority: number): string {
   return priority >= 5 ? 'Immediate life threat' : priority >= 4 ? 'Urgent response' : 'Monitor closely'
-}
-
-function buildPlan(incident: Incident, incidents: Incident[], nodes: NetworkNode[]): RescuePlan {
-  const related = incidents.filter(
-    candidate => candidate.placeName === incident.placeName || candidate.userId === incident.userId,
-  )
-  const offline = nodes.filter(node => node.status === 'OFFLINE')
-  const hasFireSignal = related.some(candidate => candidate.type === 'Fire')
-  const hasTrappedSignal = related.some(candidate => candidate.type === 'Trapped')
-  const priority = incident.priority ?? 2
-  const isUrgent = priority >= 4
-  const evidence: AgentEvidence[] = [
-    {
-      label: `${related.length} linked reports`,
-      detail: related.length > 1 ? `Reports cluster around ${incident.placeName ?? 'the same area'}.` : 'No nearby duplicate report found yet.',
-      tone: related.length > 1 ? 'confirmed' : 'unknown',
-    },
-    {
-      label: `${incident.type} signal`,
-      detail: `${incident.people} ${incident.people === 1 ? 'person' : 'people'} reported at ${incident.locationDetail ?? incident.location}.`,
-      tone: 'confirmed',
-    },
-    {
-      label: offline.length ? `${offline.length} relay warning` : 'Mesh path operational',
-      detail: offline.length
-        ? `${offline.map(node => node.name).join(', ')} is not responding; information from that zone may be stale.`
-        : 'The current message path is reporting healthy nodes.',
-      tone: offline.length ? 'warning' : 'confirmed',
-    },
-  ]
-
-  const approach = hasFireSignal || hasTrappedSignal ? 'North entrance → Relay 03 → east corridor' : 'Gateway → nearest confirmed access point'
-  const avoid = hasFireSignal ? 'West stairwell until smoke conditions are confirmed' : 'Any route without a recent civilian or relay signal'
-  const coordinates = incident.location.split(',').map(Number)
-  const route: RoutePoint[] = coordinates.length === 2 && coordinates.every(Number.isFinite)
-    ? [
-        { lat: coordinates[0] + 0.0012, lon: coordinates[1] - 0.0012, label: 'Approach start', kind: 'waypoint' },
-        { lat: coordinates[0] + 0.00076, lon: coordinates[1] - 0.00072, label: 'Confirmed approach', kind: 'waypoint' },
-        { lat: coordinates[0], lon: coordinates[1], label: 'Civilian signal', kind: 'civilian' },
-      ]
-    : []
-
-  return {
-    priority,
-    title: `${incident.type} cluster near ${incident.placeName ?? 'reported location'}`,
-    summary: `${related.length} report${related.length === 1 ? '' : 's'} suggest ${incident.people} ${incident.people === 1 ? 'person may need' : 'people may need'} help now. ${hasFireSignal ? 'Smoke makes the west approach unreliable.' : 'The next priority is confirming access and condition.'}`,
-    approach,
-    avoid,
-    confidence: offline.length ? 'MEDIUM' : isUrgent ? 'HIGH' : 'MEDIUM',
-    evidence,
-    unknowns: [
-      hasTrappedSignal ? 'Whether all occupants can still move' : 'Whether this is a duplicate of a nearby report',
-      offline.length ? 'Whether civilians in the relay gap can receive a reply' : 'Exact responder arrival route',
-    ],
-    draft: `Net0 received your ${incident.type.toLowerCase()} report at ${incident.placeName ?? incident.location}. Reply 1 if you can move, 2 if injured, or 3 if trapped.`,
-    route,
-    routeLabel: route.length ? 'Preferred corridor' : 'Route waiting for GPS',
-    routeNote: route.length
-      ? 'Preferred street corridor toward the civilian signal; verify closures before entry.'
-      : 'A GPS-backed report is needed to draw the preferred street corridor.',
-  }
 }
 
 function StatusDot({ tone }: { tone: AgentEvidence['tone'] }) {
@@ -74,10 +11,8 @@ function StatusDot({ tone }: { tone: AgentEvidence['tone'] }) {
 
 export default function AgentModeDock({
   active,
-  incidents,
   selectedId,
-  nodes,
-  plan: remotePlan,
+  plan,
   brief,
   loading = false,
   runStatus = null,
@@ -89,16 +24,6 @@ export default function AgentModeDock({
   const [deliveryStatus, setDeliveryStatus] = useState<'sent' | 'pending' | null>(null)
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
-  const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
-  const focusIncident =
-    selectedIncident ?? [...incidents].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]
-  const fallbackPlan = useMemo(
-    () => (focusIncident ? buildPlan(focusIncident, incidents, nodes) : null),
-    [focusIncident, incidents, nodes],
-  )
-  const plan = remotePlan && fallbackPlan && remotePlan.route.length === 0 && fallbackPlan.route.length > 0
-    ? { ...remotePlan, route: fallbackPlan.route, routeLabel: fallbackPlan.routeLabel, routeNote: fallbackPlan.routeNote }
-    : remotePlan ?? fallbackPlan
 
   useEffect(() => {
     setApproved(false)
@@ -154,7 +79,7 @@ export default function AgentModeDock({
           <div className="agent-mode-row">
             <div>
               <strong>{active ? 'Agent is assisting' : 'Agent is paused'}</strong>
-              <span>{active ? 'Sorting, clustering, and preparing actions' : 'Manual responder workflow remains active'}</span>
+              <span>{active ? 'Gemini clustering, triage, and rescue planning' : 'Manual responder workflow remains active'}</span>
             </div>
             <button
               type="button"
@@ -179,6 +104,7 @@ export default function AgentModeDock({
                 <div className="agent-live-brief">
                   <span className="agent-section-label">Live synthesis · {brief.incidentCount} incident clusters</span>
                   <strong>{brief.insight}</strong>
+                  {brief.summary ? <p className="agent-plan-summary">{brief.summary}</p> : null}
                 </div>
               )}
               <h3>{plan.title}</h3>
@@ -193,26 +119,6 @@ export default function AgentModeDock({
                 <div className="agent-route avoid">
                   <span className="route-kicker">Avoid for now</span>
                   <strong>{plan.avoid}</strong>
-                </div>
-
-                <div className="agent-best-path">
-                  <div className="agent-best-path-heading">
-                    <div>
-                      <span className="agent-section-label">Best path · visible on map</span>
-                      <strong>{plan.routeLabel}</strong>
-                    </div>
-                    <span className="agent-path-status"><i /> {plan.route.length ? 'Street corridor' : 'Waiting for GPS'}</span>
-                  </div>
-                  <div className="agent-path-steps">
-                    {plan.route.length
-                      ? plan.route.map((point, index) => (
-                          <span key={`${point.label}-${point.lat}`}>
-                            <b>{index + 1}</b>{point.label}{index < plan.route.length - 1 && <em>→</em>}
-                          </span>
-                        ))
-                      : <span>Select a GPS-backed report to draw the preferred corridor.</span>}
-                  </div>
-                  <p>{plan.routeNote}</p>
                 </div>
               </div>
 
@@ -255,15 +161,26 @@ export default function AgentModeDock({
               )}
 
               <div className="agent-tool-trace" aria-label="Agent activity">
-                <span>{loading ? '◌ Refreshing agent' : '✓ Clustered reports'}</span>
+                <span>{loading ? '◌ Refreshing Gemini' : '✓ Gemini clustered reports'}</span>
                 <span>✓ Checked mesh</span>
-                <span>{runStatus === 'fallback' ? '◇ Deterministic fallback' : '✓ Drafted check-in'}</span>
+                <span>{runStatus === 'ok' ? '✓ Gemini rescue plan' : '◇ Gemini unavailable'}</span>
               </div>
+            </div>
+          ) : active ? (
+            <div className="agent-paused">
+              <span className="agent-paused-mark">◌</span>
+              <p>
+                {loading
+                  ? 'Gemini is clustering reports and drafting the rescue plan…'
+                  : runStatus === 'fallback'
+                    ? 'Gemini did not return a plan. Check GEMINI_API_KEY and backend logs, then retry.'
+                    : 'Waiting for Gemini to return an agent plan for the selected report.'}
+              </p>
             </div>
           ) : (
             <div className="agent-paused">
               <span className="agent-paused-mark">✦</span>
-              <p>Turn Agent Mode on to automatically prioritize incidents and prepare a grounded rescue plan.</p>
+              <p>Turn Agent Mode on to let Gemini prioritize incidents, cluster nearby GPS reports, and prepare a rescue plan.</p>
               <button type="button" className="agent-enable" onClick={toggleMode}>Enable Agent Mode</button>
             </div>
           )}
@@ -274,7 +191,7 @@ export default function AgentModeDock({
         <span className="agent-orbit" aria-hidden><span /></span>
         <span className="agent-dock-label">
           <strong>Agent Mode</strong>
-          <small>{active ? 'ON · ready to assist' : 'OFF · manual control'}</small>
+          <small>{active ? 'ON · Gemini assisting' : 'OFF · manual control'}</small>
         </span>
         <span className="agent-caret" aria-hidden>{expanded ? '⌄' : '⌃'}</span>
       </button>

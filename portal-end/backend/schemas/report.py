@@ -21,6 +21,8 @@ class ReportList(BaseModel):
     acked_at: datetime | None = None
     ai_responders: list[str] | None = None
     cluster_id: str | None = None
+    cluster_summary: str | None = None
+    cluster_responders: list[str] | None = None
 
 
 class ReportDetail(ReportList):

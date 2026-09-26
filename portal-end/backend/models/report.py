@@ -45,5 +45,7 @@ class Report(Base):
     ai_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     ai_responders: Mapped[list | None] = mapped_column(JSON, nullable=True)
     cluster_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    cluster_summary: Mapped[str | None] = mapped_column(String(600), nullable=True)
+    cluster_responders: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="reports")

@@ -12,8 +12,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from ai.process import enqueue_process_report
-from ai.agent import enqueue_agent
+from ai.cluster import enqueue_baseline
 from database import SessionLocal
 from models.message import Message as MessageRow
 from models.node import Node, utcnow
@@ -69,8 +68,7 @@ def handle_uplink(
         db.close()
 
     if new_report_msg_id is not None:
-        enqueue_process_report(new_report_msg_id)
-        enqueue_agent(new_report_msg_id)
+        enqueue_baseline(new_report_msg_id)
 
 
 def mark_stale_nodes_offline() -> int:

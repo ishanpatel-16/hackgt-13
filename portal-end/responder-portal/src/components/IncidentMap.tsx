@@ -4,6 +4,7 @@ import type { FeatureCollection } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import type { Incident } from '../types/incident'
 import { emergencyIconHtml } from './EmergencyIcon'
+import { RESPONDER_SHORT } from '../utils/responders'
 
 interface Props {
   incidents: Incident[]
@@ -42,24 +43,20 @@ function distanceMeters(left: L.LatLngTuple, right: L.LatLngTuple): number {
 }
 
 function clusterIncidents(incidents: Incident[]): IncidentCluster[] {
-  const groups: Array<{ incidents: Incident[]; points: L.LatLngTuple[] }> = []
+  const groups = new Map<string, { incidents: Incident[]; points: L.LatLngTuple[] }>()
   incidents.forEach(incident => {
     const point = coordinates(incident)
-    if (!point) return
-    const existing = groups.find(group =>
-      incident.clusterId
-        ? group.incidents.some(candidate => candidate.clusterId === incident.clusterId)
-        : group.points.some(candidate => distanceMeters(candidate, point) <= 340),
-    )
+    if (!point || !incident.clusterId) return
+    const existing = groups.get(incident.clusterId)
     if (existing) {
       existing.incidents.push(incident)
       existing.points.push(point)
     } else {
-      groups.push({ incidents: [incident], points: [point] })
+      groups.set(incident.clusterId, { incidents: [incident], points: [point] })
     }
   })
 
-  return groups
+  return [...groups.values()]
     .filter(group => group.incidents.length > 1)
     .map(group => {
       const center: L.LatLngTuple = [
@@ -83,19 +80,19 @@ function escapeHtml(value: string): string {
 
 function clusterPopup(cluster: IncidentCluster): string {
   const people = cluster.incidents.reduce((sum, incident) => sum + incident.people, 0)
-  const types = [...new Set(cluster.incidents.map(incident => incident.type))].join(' · ')
-  const signals = cluster.incidents
-    .map(incident => incident.aiSummary || incident.report)
-    .filter(Boolean)
-    .slice(0, 3)
-    .map(signal => `<li>${escapeHtml(signal)}</li>`)
-    .join('')
+  const summary =
+    cluster.incidents.find(incident => incident.clusterSummary)?.clusterSummary
+    || cluster.incidents.find(incident => incident.aiSummary)?.aiSummary
+    || 'Nearby reports share this area.'
+  const responders = [...new Set(cluster.incidents.flatMap(incident =>
+    incident.clusterResponders?.length ? incident.clusterResponders : incident.aiResponders,
+  ))]
+  const responderLabels = responders.map(item => RESPONDER_SHORT[item] ?? item).join(' · ')
   return `<div class="cluster-popup-content">
-    <span class="cluster-popup-kicker">Agent synthesis · ${cluster.incidents.length} reports</span>
-    <strong>${people} ${people === 1 ? 'person' : 'people'} may need coordinated response</strong>
-    <span class="cluster-popup-meta">${escapeHtml(types)} · P${Math.max(...cluster.incidents.map(incident => incident.priority ?? 0))} highest priority</span>
-    <ul>${signals || '<li>Reports share a nearby GPS area; verify conditions on arrival.</li>'}</ul>
-    <em>Grouped by GPS proximity and report evidence.</em>
+    <span class="cluster-popup-kicker">${cluster.incidents.length} linked reports</span>
+    <strong>${escapeHtml(summary)}</strong>
+    <span class="cluster-popup-meta">${people} ${people === 1 ? 'person' : 'people'} reported</span>
+    <span class="cluster-popup-meta"><b>Responders:</b> ${escapeHtml(responderLabels || 'pending')}</span>
   </div>`
 }
 

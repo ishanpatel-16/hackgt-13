@@ -29,6 +29,8 @@ export interface ApiReport {
   ai_summary?: string | null
   ai_responders?: string[] | null
   cluster_id?: string | null
+  cluster_summary?: string | null
+  cluster_responders?: string[] | null
   created_at?: string | null
   acked_at?: string | null
   user?: ApiReportUser | null

@@ -132,6 +132,9 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db)):
     db.add(report)
     db.commit()
     db.refresh(report)
+    from ai.cluster import enqueue_baseline
+
+    enqueue_baseline(report.msg_id)
     return report
 
 
