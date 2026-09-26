@@ -213,11 +213,45 @@
       <div>
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <h3 style="margin:0">Messages <span id="count-messages" class="muted"></span></h3>
-          <input id="filter-messages" placeholder="filter sender, text…" style="max-width:260px" oninput="renderMessages()">
+          <div class="row">
+            <select id="filter-msg-kind" style="width:auto" onchange="renderMessages()">
+              <option value="">all</option>
+              <option value="uplink">↑ user_reply (phone → portal)</option>
+              <option value="downlink">↓ message (portal → phone)</option>
+            </select>
+            <input id="msg-user" type="number" min="1" max="65535" placeholder="conversation: user_id" title="Show one user's conversation (uses /api/messages/upstream + /downstream)" style="max-width:170px" onchange="loadMessages()">
+            <input id="filter-messages" placeholder="filter sender, text…" style="max-width:200px" oninput="renderMessages()">
+          </div>
         </div>
         <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
-          <table id="tbl-messages"><thead><tr><th>id</th><th>msg_id</th><th>dir</th><th>user</th><th>reply_to</th><th>target</th><th>sender</th><th>text</th><th>status</th><th></th></tr></thead><tbody></tbody></table>
+          <table id="tbl-messages"><thead><tr><th>id</th><th>type</th><th>msg_id</th><th>user</th><th>reply_to</th><th>node / path</th><th>sender</th><th>text</th><th>status</th><th>created</th><th></th></tr></thead><tbody></tbody></table>
         </div>
+        <p class="help" style="margin:8px 0 0">msg_id / reply_to in hex, same as the phone page and gateway serial log. <b>user_reply</b> = phone's follow-up (mesh → gateway → BLE). <b>message</b> = portal → phone (BLE → gateway floods to target node).</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="form">
+        <h3>Send to phone (real downlink)</h3>
+        <div class="form-grid">
+          <label>user_id <input id="s-user" type="number" min="1" max="65535" placeholder="e.g. 4821"></label>
+          <label>sender <input id="s-sender" value="Portal" maxlength="32"></label>
+          <label style="grid-column:1/-1">reply_to (hex report msg_id, opt) <input id="s-reply" placeholder="blank = user's latest report"></label>
+          <label style="grid-column:1/-1">text <textarea id="s-text" rows="2" maxlength="400">Help is on the way. Stay where you are.</textarea></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="sendToPhone()">Send over mesh</button>
+        </div>
+        <p class="help">POST /api/messages/send → BLE → gateway floods it to the user's origin node; the phone shows it within ~3 s. Status <code>sent</code> = queued to BLE, <code>pending</code> = gateway not connected.</p>
+      </div>
+      <div class="form">
+        <h3>Fake user_reply (no hardware)</h3>
+        <div class="form-grid">
+          <label>user_id <input id="f-user" type="number" value="1"></label>
+          <label>origin node <input id="f-origin" type="number" value="1"></label>
+          <label style="grid-column:1/-1">reply_to (hex, opt) <input id="f-reply" placeholder="0"></label>
+          <label style="grid-column:1/-1">text <textarea id="f-text" rows="2">Water is rising, we moved to the roof.</textarea></label>
+        </div>
+        <div class="row" style="margin-top:10px"><button onclick="fakeUserReply()">Inject</button></div>
+        <p class="help">Runs the same handler as a real BLE uplink (POST /api/debug/fake/user_reply).</p>
       </div>
       <div class="form">
         <h3 id="msg-form-title">Create message</h3>
@@ -240,6 +274,7 @@
           <span class="help">Editing <span id="edit-msg-id"></span></span>
           <div class="row" style="margin-top:6px"><button onclick="saveMsgEdit()">Save PATCH</button><button onclick="cancelMsgEdit()">Cancel</button></div>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -301,7 +336,23 @@ async function loadStats(){
 async function loadReports(){ try{ state.reports=await api('/api/reports?limit=200'); renderReports(); }catch(e){} }
 async function loadNodes(){ try{ state.nodes=await api('/api/nodes'); renderNodes(); }catch(e){} }
 async function loadUsers(){ try{ state.users=await api('/api/users'); renderUsers(); }catch(e){} }
-async function loadMessages(){ try{ state.messages=await api('/api/messages?limit=200'); renderMessages(); }catch(e){} }
+// With a user_id: that user's conversation, oldest first (phone replies + portal messages).
+// Without: every message, newest first.
+async function loadMessages(){
+  const uid=parseInt($('#msg-user').value);
+  try{
+    if(uid){
+      const [up,down]=await Promise.all([api(`/api/messages/upstream/${uid}?limit=500`), api(`/api/messages/downstream/${uid}?limit=500`)]);
+      state.messages=[...up,...down].sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
+    } else {
+      state.messages=await api('/api/messages?limit=200');
+    }
+    state.msgError='';
+  }catch(e){
+    state.messages=[]; state.msgError= uid && e.message.includes('User not found') ? `user ${uid} not found` : 'load failed';
+  }
+  renderMessages();
+}
 async function loadAll(){ await Promise.all([loadStats(), loadReports(), loadNodes(), loadUsers(), loadMessages()]); }
 function esc(s){ if(s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function fmtTime(s){ if(!s) return '<span class="muted">—</span>'; try{ return new Date(s).toLocaleString(); }catch{ return esc(s); } }
@@ -369,27 +420,56 @@ function renderUsers(){
     tbody.appendChild(tr);
   });
 }
+const hex = v => (v===null||v===undefined) ? '—' : (v===0 ? '0' : Number(v).toString(16).toUpperCase().padStart(8,'0'));
+const parseHex = v => { v=(v||'').trim().replace(/^0x/i,''); if(!v) return null; const n=parseInt(v,16); if(isNaN(n)) throw new Error('bad hex: '+v); return n; };
 function renderMessages(){
   const q=($('#filter-messages').value||'').toLowerCase();
+  const kind=$('#filter-msg-kind').value;
   let rows=state.messages;
+  if(kind) rows=rows.filter(r=> r.direction===kind);
   if(q) rows=rows.filter(r=> JSON.stringify(r).toLowerCase().includes(q));
-  $('#count-messages').textContent=`(${rows.length})`;
+  const uid=parseInt($('#msg-user').value);
+  $('#count-messages').textContent= state.msgError ? `(${state.msgError})` : `(${rows.length}${uid?` · user ${uid} conversation`:''})`;
   const tbody=$('#tbl-messages tbody'); tbody.innerHTML='';
   rows.forEach(m=>{
+    const up=m.direction==='uplink';
+    const type= up ? '<span class="badge online">↑ user_reply</span>' : (m.direction==='downlink' ? '<span class="badge" style="color:var(--accent2);border-color:rgba(96,165,250,.5)">↓ message</span>' : `<span class="badge">${esc(m.direction)}</span>`);
+    const where = up ? `from ${m.target_node??'—'} ${m.path?esc(JSON.stringify(m.path)):''}` : `→ ${m.target_node===255?'all':(m.target_node??'—')}`;
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td class="mono">${m.id}</td>
-      <td class="mono">${m.msg_id??'—'}</td>
-      <td><span class="badge">${esc(m.direction)}</span></td>
-      <td class="mono">${m.user_id??'—'}</td>
-      <td class="mono">${m.reply_to}</td>
-      <td class="mono">${m.target_node??'—'}</td>
-      <td>${esc(m.sender)}</td>
-      <td>${esc((m.text||'').slice(0,48))}</td>
+      <td style="white-space:nowrap">${type}</td>
+      <td class="mono" title="${m.msg_id??''}">${hex(m.msg_id)}</td>
+      <td class="mono">${m.user_id??'all'}</td>
+      <td class="mono" title="${m.reply_to}">${hex(m.reply_to)}</td>
+      <td class="mono" style="font-size:11px">${where}</td>
+      <td>${esc(m.sender|| (up?'(phone)':''))}</td>
+      <td style="white-space:pre-wrap;min-width:180px;max-width:320px">${esc(m.text||'')}</td>
       <td><span class="badge">${esc(m.status)}</span></td>
-      <td><div class="actions"><button onclick="startEditMsg(${m.id})">Edit</button><button onclick="delMsg(${m.id})">Del</button></div></td>`;
+      <td class="mono" style="font-size:11px">${fmtTime(m.created_at)}</td>
+      <td><div class="actions">${up?`<button onclick="replyTo(${m.user_id},${m.reply_to})">Reply</button>`:''}<button onclick="startEditMsg(${m.id})">Edit</button><button onclick="delMsg(${m.id})">Del</button></div></td>`;
     tbody.appendChild(tr);
   });
+}
+function replyTo(userId, reportMsgId){
+  $('#s-user').value=userId; $('#s-reply').value=reportMsgId? hex(reportMsgId):''; $('#s-text').focus(); $('#s-text').select();
+}
+async function sendToPhone(){
+  try{
+    const body={user_id: parseInt($('#s-user').value), text: $('#s-text').value.trim(), sender: $('#s-sender').value.trim()||'Portal'};
+    if(!body.user_id) throw new Error('user_id required');
+    const r=parseHex($('#s-reply').value); if(r!==null) body.reply_to=r;
+    const m=await api('/api/messages/send', {method:'POST', body:JSON.stringify(body)});
+    toast(`message → node ${m.target_node} (${m.status})`, m.status==='sent'); loadMessages(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+async function fakeUserReply(){
+  try{
+    const origin=parseInt($('#f-origin').value);
+    const body={msg_id: Math.floor(Math.random()*0xFFFFFFFE)+1, user_id: parseInt($('#f-user').value), origin, path:[origin], reply_to: parseHex($('#f-reply').value)||0, text: $('#f-text').value};
+    await api('/api/debug/fake/user_reply', {method:'POST', body:JSON.stringify(body)});
+    toast('user_reply injected'); loadMessages(); loadUsers(); loadStats();
+  }catch(e){ toast(e.message,false); }
 }
 async function createUser(){
   try{
