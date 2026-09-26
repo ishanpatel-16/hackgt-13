@@ -4,13 +4,13 @@ import IncidentQueue from './components/IncidentQueue'
 import IncidentMap from './components/IncidentMap'
 import NavRail, { type AppView } from './components/NavRail'
 import MessagesView from './views/MessagesView'
-import { mockIncidents, mockNetworkNodes } from './data/mockIncidents'
+import { useLivePortal } from './hooks/useLivePortal'
 import type { AiResponder } from './types/incident'
 import { filterByResponders } from './utils/groupIncidents'
 import './App.css'
 
 function App() {
-  const [incidents, setIncidents] = useState(mockIncidents)
+  const { incidents, nodes, loading, error, link, acknowledge } = useLivePortal()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedFilters, setSelectedFilters] = useState<AiResponder[]>([])
   const [view, setView] = useState<AppView>('home')
@@ -33,19 +33,11 @@ function App() {
   function selectIncident(id: string) {
     setSelectedId(id)
     setPeekUserId(null)
-    setIncidents(current =>
-      current.map(incident =>
-        incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
-      ),
-    )
+    void acknowledge(id)
   }
 
   function acknowledgeIncident(id: string) {
-    setIncidents(current =>
-      current.map(incident =>
-        incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
-      ),
-    )
+    void acknowledge(id)
   }
 
   function changeFilters(next: AiResponder[]) {
@@ -73,11 +65,20 @@ function App() {
     }
   }
 
+  const emptyMessage =
+    incidents.length > 0
+      ? 'No reports match these filters.'
+      : error
+        ? error
+        : loading
+          ? 'Connecting to the portal server…'
+          : 'No reports yet. New emergencies will appear here.'
+
   return (
     <div className="app-shell">
       <NavRail view={view} onChange={changeView} />
       <div className="dashboard">
-        <Header nodes={mockNetworkNodes} />
+        <Header nodes={nodes} link={link} />
         <main className={`dashboard-content ${view === 'messages' ? 'messages-mode' : ''}`}>
           {view === 'home' ? (
             <div className="workspace">
@@ -93,6 +94,8 @@ function App() {
                 peekUserId={peekUserId}
                 onPeekUser={setPeekUserId}
                 onOpenMessages={openMessages}
+                notice={error && incidents.length > 0 ? error : null}
+                emptyMessage={emptyMessage}
               />
               <IncidentMap
                 incidents={filteredIncidents}

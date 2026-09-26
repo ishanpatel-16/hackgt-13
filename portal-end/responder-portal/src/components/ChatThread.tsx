@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useConversation } from '../hooks/useConversation'
 import { MESSAGE_MAX } from '../types/message'
 import type { PortalMessage } from '../types/message'
+import { parseServerTime } from '../utils/serverTime'
 
 interface Props {
   userId: number
@@ -11,9 +12,9 @@ interface Props {
 }
 
 function formatTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const ms = parseServerTime(iso)
+  if (ms == null) return ''
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
 export default function ChatThread({ userId, active = true, compact = false }: Props) {

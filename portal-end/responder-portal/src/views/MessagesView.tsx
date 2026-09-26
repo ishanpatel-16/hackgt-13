@@ -4,6 +4,7 @@ import type { Incident } from '../types/incident'
 import type { ConversationSummary } from '../types/message'
 import { displayName } from '../utils/groupIncidents'
 import { isConversationUnread, markConversationRead } from '../utils/messageRead'
+import { parseServerTime } from '../utils/serverTime'
 import ChatThread from '../components/ChatThread'
 
 interface Props {
@@ -241,8 +242,10 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
 }
 
 function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
-  if (Number.isNaN(ms)) return ''
+  const then = parseServerTime(iso)
+  if (then == null) return ''
+  const ms = Date.now() - then
+  if (ms < 0) return 'now'
   const minutes = Math.round(ms / 60000)
   if (minutes < 1) return 'now'
   if (minutes < 60) return `${minutes}m`

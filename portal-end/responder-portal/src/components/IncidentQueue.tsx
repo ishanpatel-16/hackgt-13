@@ -19,6 +19,8 @@ interface Props {
   peekUserId: number | null
   onPeekUser: (userId: number | null) => void
   onOpenMessages: (userId: number) => void
+  notice?: string | null
+  emptyMessage?: string
 }
 
 export default function IncidentQueue({
@@ -33,6 +35,8 @@ export default function IncidentQueue({
   peekUserId,
   onPeekUser,
   onOpenMessages,
+  notice = null,
+  emptyMessage = 'No reports match these filters.',
 }: Props) {
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
   const [sort, setSort] = useState<IncidentSort>('arrival')
@@ -174,9 +178,14 @@ export default function IncidentQueue({
           </div>
         </div>
         <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
+        {notice ? (
+          <p className="connection-note" role="status">
+            {notice}
+          </p>
+        ) : null}
         <div className="incident-feed">
           {groups.length === 0 ? (
-            <p className="queue-empty">No reports match these filters.</p>
+            <p className="queue-empty">{emptyMessage}</p>
           ) : (
             groups.map(group => (
               <UserIncidentGroupRow

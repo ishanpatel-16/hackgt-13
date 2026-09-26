@@ -1,7 +1,7 @@
 import type { Incident } from '../types/incident'
 import type { UserIncidentGroup } from '../utils/groupIncidents'
 import { displayName, groupAgeLabel } from '../utils/groupIncidents'
-import { formatRelativeTime } from '../utils/relativeTime'
+import { formatClock, formatRelativeTime } from '../utils/relativeTime'
 import ResponderPills from './ResponderPills'
 import PriorityMeter from './PriorityMeter'
 
@@ -44,7 +44,11 @@ export default function UserIncidentGroupRow({
             </span>
             <span className="user-priority-row">
               <PriorityMeter level={group.maxPriority} />
-              <ResponderPills responders={group.responders} className="user-pills" />
+              {group.responders.length > 0 ? (
+                <ResponderPills responders={group.responders} className="user-pills" />
+              ) : group.reports.every(report => report.respondersReady === false) ? (
+                <span className="ai-pending-label">AI pending</span>
+              ) : null}
             </span>
           </span>
           {group.hasNew && <span className="user-status new">NEW</span>}
@@ -105,12 +109,18 @@ function ReportRow({
           <span className="report-status-spacer" aria-hidden />
         )}
         <span className="report-body">
-          <span className="report-place">{report.placeName ?? report.location}</span>
+          <span className="report-place">{report.placeName || report.location || 'Location not provided'}</span>
         </span>
         <PriorityMeter level={report.priority} />
-        <span className="report-age">{formatRelativeTime(report.arrivedAt, now)}</span>
+        <span className="report-age" title={formatClock(report.arrivedAt) || undefined}>
+          {formatRelativeTime(report.arrivedAt, now)}
+        </span>
       </span>
-      <ResponderPills responders={report.aiResponders} className="report-pills" />
+      {report.aiResponders.length > 0 ? (
+        <ResponderPills responders={report.aiResponders} className="report-pills" />
+      ) : report.respondersReady === false ? (
+        <span className="ai-pending-label">AI pending</span>
+      ) : null}
     </button>
   )
 }

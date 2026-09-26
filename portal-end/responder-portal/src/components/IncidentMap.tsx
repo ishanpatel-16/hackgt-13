@@ -11,6 +11,16 @@ interface Props {
 }
 
 function coordinates(incident: Incident): L.LatLngTuple | null {
+  if (
+    incident.lat != null &&
+    incident.lon != null &&
+    Number.isFinite(incident.lat) &&
+    Number.isFinite(incident.lon) &&
+    Math.abs(incident.lat) <= 90 &&
+    Math.abs(incident.lon) <= 180
+  ) {
+    return [incident.lat, incident.lon]
+  }
   const values = incident.location.split(',').map(Number)
   return values.length === 2 && values.every(Number.isFinite) && Math.abs(values[0]) <= 90 && Math.abs(values[1]) <= 180
     ? [values[0], values[1]]
@@ -42,8 +52,19 @@ function flyPinIntoView(map: L.Map, latlng: L.LatLngExpression, animate: boolean
   }
 }
 
+function markerTitle(incident: Incident): string {
+  const sos = incident.msgId != null ? incident.msgId : incident.id
+  const people = incident.people > 0 ? `${incident.people} people` : 'people unknown'
+  return `${incident.type} SOS ${sos}, ${people}`
+}
+
 function markerSymbol(incident: Incident): string {
-  return incident.type === 'Medical' ? '+' : incident.type === 'Fire' ? '♨' : incident.type === 'Trapped' ? '!' : '•'
+  if (incident.type === 'Medical') return '+'
+  if (incident.type === 'Fire') return '♨'
+  if (incident.type === 'Trapped') return '!'
+  if (incident.type === 'Flood') return '~'
+  if (incident.type === 'Hazmat') return '☣'
+  return '•'
 }
 
 function markerClasses(incident: Incident, selectedId: string | null): string {
@@ -58,6 +79,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
   const selectRef = useRef(onSelectIncident)
   const selectedRef = useRef(selectedId)
   const firstSelect = useRef(true)
+  const didFit = useRef(false)
   const [mapError, setMapError] = useState(false)
 
   selectRef.current = onSelectIncident
@@ -157,7 +179,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
         }
         existing.button.className = markerClasses(incident, selectedRef.current)
         existing.button.textContent = markerSymbol(incident)
-        existing.button.title = `${incident.type} SOS ${incident.id}, ${incident.people} people`
+        existing.button.title = markerTitle(incident)
         existing.button.setAttribute('aria-label', existing.button.title)
         return
       }
@@ -166,7 +188,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       button.type = 'button'
       button.className = markerClasses(incident, selectedRef.current)
       button.textContent = markerSymbol(incident)
-      button.title = `${incident.type} SOS ${incident.id}, ${incident.people} people`
+      button.title = markerTitle(incident)
       button.setAttribute('aria-label', button.title)
       button.onclick = event => {
         event.stopPropagation()
@@ -177,6 +199,23 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
         keyboard: false,
       }).addTo(layers)
       markersRef.current.set(incident.id, { marker, button })
+    })
+  }, [incidents])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || didFit.current || selectedRef.current) return
+    const points = incidents.flatMap(incident => {
+      const point = coordinates(incident)
+      return point ? [point] : []
+    })
+    if (!points.length) return
+    didFit.current = true
+    const left = leftChromeWidth(map)
+    map.fitBounds(L.latLngBounds(points).pad(0.2), {
+      paddingTopLeft: [left, 32],
+      paddingBottomRight: [32, 32],
+      animate: false,
     })
   }, [incidents])
 

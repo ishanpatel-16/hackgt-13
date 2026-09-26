@@ -1,5 +1,6 @@
 import type { AiResponder, AiPriority, Incident } from '../types/incident'
 import { formatRelativeTime } from './relativeTime'
+import { parseServerTime } from './serverTime'
 
 export type IncidentSort = 'arrival' | 'priority'
 
@@ -8,7 +9,7 @@ export interface UserIncidentGroup {
   userName?: string
   reports: Incident[]
   newestArrivedAt: string
-  maxPriority: AiPriority
+  maxPriority: AiPriority | null
   hasNew: boolean
   responders: AiResponder[]
 }
@@ -23,16 +24,22 @@ export function filterByResponders(
   return incidents.filter(incident => incident.aiResponders.some(r => set.has(r)))
 }
 
-function maxPriorityOf(reports: Incident[]): AiPriority {
-  return reports.reduce<AiPriority>((max, report) => {
-    return report.priority > max ? report.priority : max
-  }, 1)
+function timeMs(iso: string): number {
+  return parseServerTime(iso) ?? 0
+}
+
+function maxPriorityOf(reports: Incident[]): AiPriority | null {
+  return reports.reduce<AiPriority | null>((max, report) => {
+    if (report.priority == null) return max
+    if (max == null || report.priority > max) return report.priority
+    return max
+  }, null)
 }
 
 function newestTimestamp(reports: Incident[]): string {
   return reports.reduce((newest, report) => {
-    return new Date(report.arrivedAt).getTime() > new Date(newest).getTime() ? report.arrivedAt : newest
-  }, reports[0]?.arrivedAt ?? new Date(0).toISOString())
+    return timeMs(report.arrivedAt) > timeMs(newest) ? report.arrivedAt : newest
+  }, reports[0]?.arrivedAt ?? '')
 }
 
 /** Group filtered incidents by userId. */
@@ -67,13 +74,12 @@ export function sortGroups(groups: UserIncidentGroup[], sort: IncidentSort): Use
   const copy = [...groups]
   if (sort === 'priority') {
     copy.sort((a, b) => {
-      if (b.maxPriority !== a.maxPriority) return b.maxPriority - a.maxPriority
-      return new Date(b.newestArrivedAt).getTime() - new Date(a.newestArrivedAt).getTime()
+      const priorityDelta = (b.maxPriority ?? 0) - (a.maxPriority ?? 0)
+      if (priorityDelta !== 0) return priorityDelta
+      return timeMs(b.newestArrivedAt) - timeMs(a.newestArrivedAt)
     })
   } else {
-    copy.sort(
-      (a, b) => new Date(b.newestArrivedAt).getTime() - new Date(a.newestArrivedAt).getTime(),
-    )
+    copy.sort((a, b) => timeMs(b.newestArrivedAt) - timeMs(a.newestArrivedAt))
   }
   return copy
 }
