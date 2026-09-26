@@ -106,7 +106,7 @@
           <input id="filter-reports" placeholder="filter by location, status, user_id…" style="max-width:260px" oninput="renderReports()">
         </div>
         <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
-          <table id="tbl-reports"><thead><tr><th>id</th><th>msg_id</th><th>user</th><th>origin→path</th><th>cat/sev</th><th>people/needs</th><th>location</th><th>status</th><th>created</th><th></th></tr></thead><tbody></tbody></table>
+          <table id="tbl-reports"><thead><tr><th>id</th><th>msg_id</th><th>user</th><th>origin→path</th><th>category</th><th>people/needs</th><th>location</th><th>GPS</th><th>status</th><th>created</th><th></th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="form" id="form-reports">
@@ -117,7 +117,6 @@
           <label>origin <input id="r-origin" type="number" value="1"></label>
           <label>path (csv) <input id="r-path" value="1,9"></label>
           <label>category <select id="r-category"><option value="0">0 unknown</option><option value="1" selected>1 medical</option><option value="2">2 trapped</option><option value="3">3 fire</option><option value="4">4 flood</option><option value="5">5 structural</option><option value="6">6 security</option><option value="7">7 hazmat</option><option value="8">8 other</option></select></label>
-          <label>severity <select id="r-severity"><option value="0">0 unknown</option><option value="1" selected>1 low</option><option value="2">2 moderate</option><option value="3">3 high</option><option value="4">4 life</option></select></label>
           <label>people <input id="r-people" type="number" value="1"></label>
           <label>needs (bits) <input id="r-needs" type="number" value="0"></label>
           <label style="grid-column:1/-1">location <input id="r-location" value="Test Location"></label>
@@ -319,9 +318,10 @@ function renderReports(){
       <td class="mono">${r.msg_id}</td>
       <td class="mono">${r.user_id}</td>
       <td class="mono">${r.origin} → ${esc(JSON.stringify(r.path))}</td>
-      <td>${r.category}/${r.severity}</td>
+      <td>${r.category}${r.ai_priority!=null?` <span class="muted">(${r.ai_priority})</span>`:''}</td>
       <td>${r.people}/${r.needs}</td>
       <td>${esc(r.location||'')}<div class="muted" style="font-size:11px">${esc((r.message||'').slice(0,48))}</div></td>
+      <td class="mono" style="font-size:11px">${r.gps_lat!=null&&r.gps_lon!=null ? `${r.gps_lat.toFixed(4)}, ${r.gps_lon.toFixed(4)}<br><span class="muted">±${r.gps_accuracy!=null?r.gps_accuracy:'?'}m</span> <a href="https://maps.google.com/?q=${r.gps_lat},${r.gps_lon}" target="_blank" style="font-size:10px">map↗</a>` : '<span class="muted">—</span>'}</td>
       <td><span class="badge">${esc(r.status)}</span></td>
       <td class="mono" style="font-size:11px">${fmtTime(r.created_at)}</td>
       <td><div class="actions"><button onclick="startEditReport(${r.id})">Edit</button><button onclick="delReport(${r.id})">Del</button></div></td>`;
@@ -411,7 +411,7 @@ async function createReport(){
       msg_id: $('#r-msg_id').value? parseInt($('#r-msg_id').value): Math.floor(Math.random()*900000+100000),
       user_id: parseInt($('#r-user_id').value), origin: parseInt($('#r-origin').value),
       path: $('#r-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean),
-      category: parseInt($('#r-category').value), severity: parseInt($('#r-severity').value),
+      category: parseInt($('#r-category').value),
       people: parseInt($('#r-people').value||0), needs: parseInt($('#r-needs').value||0),
       location: $('#r-location').value, message: $('#r-message').value,
       gps_lat: $('#r-lat').value? parseFloat($('#r-lat').value): null,
@@ -439,13 +439,13 @@ async function createMessage(){
 function startEditReport(id){
   const r=state.reports.find(x=>x.id===id); if(!r) return;
   editReportId=id; $('#report-form-title').textContent='Edit report #'+id; $('#edit-report-id').textContent=id; $('#report-edit-bar').style.display='block';
-  $('#r-msg_id').value=r.msg_id; $('#r-user_id').value=r.user_id; $('#r-origin').value=r.origin; $('#r-path').value=(r.path||[]).join(','); $('#r-category').value=r.category; $('#r-severity').value=r.severity; $('#r-people').value=r.people; $('#r-needs').value=r.needs; $('#r-location').value=r.location; $('#r-message').value=r.message; $('#r-status').value=r.status;
+  $('#r-msg_id').value=r.msg_id; $('#r-user_id').value=r.user_id; $('#r-origin').value=r.origin; $('#r-path').value=(r.path||[]).join(','); $('#r-category').value=r.category; $('#r-people').value=r.people; $('#r-needs').value=r.needs; $('#r-location').value=r.location; $('#r-message').value=r.message; $('#r-status').value=r.status; $('#r-lat').value=r.gps_lat??''; $('#r-lon').value=r.gps_lon??''; $('#r-acc').value=r.gps_accuracy??'';
   window.scrollTo({top:0, behavior:'smooth'});
   document.querySelector('.tab[data-tab="reports"]').click();
 }
 async function saveReportEdit(){
   try{
-    const body={category: parseInt($('#r-category').value), severity: parseInt($('#r-severity').value), people: parseInt($('#r-people').value), needs: parseInt($('#r-needs').value), location: $('#r-location').value, message: $('#r-message').value, status: $('#r-status').value, path: $('#r-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean), origin: parseInt($('#r-origin').value)};
+    const body={category: parseInt($('#r-category').value), people: parseInt($('#r-people').value), needs: parseInt($('#r-needs').value), location: $('#r-location').value, message: $('#r-message').value, status: $('#r-status').value, path: $('#r-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean), origin: parseInt($('#r-origin').value), gps_lat: $('#r-lat').value?parseFloat($('#r-lat').value):null, gps_lon: $('#r-lon').value?parseFloat($('#r-lon').value):null, gps_accuracy: $('#r-acc').value?parseInt($('#r-acc').value):null};
     await api('/api/reports/'+editReportId, {method:'PATCH', body:JSON.stringify(body)});
     toast('report updated'); cancelReportEdit(); loadReports();
   }catch(e){ toast(e.message,false);}
