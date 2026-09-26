@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AiResponder, Incident } from '../types/incident'
-import { filterByResponders, groupByUser, sortGroups, type IncidentSort } from '../utils/groupIncidents'
+import { groupByUser, sortGroups, type IncidentSort } from '../utils/groupIncidents'
 import { useNow } from '../hooks/useRelativeTime'
 import ResponderFilter from './ResponderFilter'
 import UserIncidentGroupRow from './UserIncidentGroup'
@@ -9,6 +9,9 @@ import IncidentDetails from './IncidentDetails'
 
 interface Props {
   incidents: Incident[]
+  filteredIncidents: Incident[]
+  selectedFilters: AiResponder[]
+  onFiltersChange: (next: AiResponder[]) => void
   selectedId: string | null
   onSelect: (id: string) => void
   onClearSelect: () => void
@@ -20,6 +23,9 @@ interface Props {
 
 export default function IncidentQueue({
   incidents,
+  filteredIncidents,
+  selectedFilters,
+  onFiltersChange,
   selectedId,
   onSelect,
   onClearSelect,
@@ -28,7 +34,6 @@ export default function IncidentQueue({
   onPeekUser,
   onOpenMessages,
 }: Props) {
-  const [selectedFilters, setSelectedFilters] = useState<AiResponder[]>([])
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
   const [sort, setSort] = useState<IncidentSort>('arrival')
   const [sortOpen, setSortOpen] = useState(false)
@@ -38,13 +43,9 @@ export default function IncidentQueue({
   const peekRef = useRef<HTMLDivElement>(null)
   const now = useNow()
 
-  const filtered = useMemo(
-    () => filterByResponders(incidents, selectedFilters),
-    [incidents, selectedFilters],
-  )
   const groups = useMemo(
-    () => sortGroups(groupByUser(filtered), sort),
-    [filtered, sort],
+    () => sortGroups(groupByUser(filteredIncidents), sort),
+    [filteredIncidents, sort],
   )
 
   const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
@@ -128,7 +129,7 @@ export default function IncidentQueue({
         <div className="panel-heading">
           <h2 id="queue-heading">Incidents</h2>
           <div className="queue-heading-actions">
-            <span className="small-label">{filtered.length} reports</span>
+            <span className="small-label">{filteredIncidents.length} reports</span>
             <div className="sort-menu" ref={sortMenuRef}>
               <button
                 type="button"
@@ -172,7 +173,7 @@ export default function IncidentQueue({
             </div>
           </div>
         </div>
-        <ResponderFilter selected={selectedFilters} onChange={setSelectedFilters} />
+        <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
         <div className="incident-feed">
           {groups.length === 0 ? (
             <p className="queue-empty">No reports match these filters.</p>

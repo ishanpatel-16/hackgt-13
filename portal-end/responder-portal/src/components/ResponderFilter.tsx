@@ -11,11 +11,18 @@ interface Props {
 export default function ResponderFilter({ selected, onChange }: Props) {
   const allActive = selected.length === 0
   const barRef = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ active: boolean; startX: number; scrollLeft: number; moved: boolean }>({
+  const drag = useRef<{
+    active: boolean
+    startX: number
+    scrollLeft: number
+    moved: boolean
+    pointerId: number | null
+  }>({
     active: false,
     startX: 0,
     scrollLeft: 0,
     moved: false,
+    pointerId: null,
   })
 
   function toggle(responder: AiResponder) {
@@ -29,33 +36,41 @@ export default function ResponderFilter({ selected, onChange }: Props) {
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const el = barRef.current
     if (!el || event.button !== 0) return
+    // Track only — capture/dragging starts after a real drag so chip clicks still fire.
     drag.current = {
       active: true,
       startX: event.clientX,
       scrollLeft: el.scrollLeft,
       moved: false,
+      pointerId: event.pointerId,
     }
-    el.setPointerCapture(event.pointerId)
-    el.classList.add('dragging')
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const el = barRef.current
     if (!el || !drag.current.active) return
     const dx = event.clientX - drag.current.startX
-    if (Math.abs(dx) > 4) drag.current.moved = true
+    if (Math.abs(dx) <= 4) return
+    if (!drag.current.moved) {
+      drag.current.moved = true
+      el.setPointerCapture(event.pointerId)
+      el.classList.add('dragging')
+    }
     el.scrollLeft = drag.current.scrollLeft - dx
   }
 
   function endDrag(event: ReactPointerEvent<HTMLDivElement>) {
     const el = barRef.current
     if (!el || !drag.current.active) return
+    const wasDragging = drag.current.moved
     drag.current.active = false
     el.classList.remove('dragging')
-    try {
-      el.releasePointerCapture(event.pointerId)
-    } catch {
-      /* already released */
+    if (wasDragging) {
+      try {
+        el.releasePointerCapture(event.pointerId)
+      } catch {
+        /* already released */
+      }
     }
   }
 

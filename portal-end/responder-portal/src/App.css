@@ -247,7 +247,8 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
 .geo-marker.device.offline { background: #522e30; color: #ffc3bb; border-style: dashed; }
 .geo-marker.device.offline::after { content: '×'; position: absolute; top: -6px; right: -3px; background: #522e30; border-radius: 50%; padding: 0 3px; }
 .geo-marker.device.unknown { background: #303943; border-color: #83919d; color: #cbd3dc; }
-.street-name { font-size: 10px; color: #a1adba; white-space: nowrap; text-shadow: 0 1px 2px #111; pointer-events: none; }
+.street-name { display: none; }
+.geo-label { display: none; }
 .leaflet-control-zoom a { background: #24323e; color: #e8eef2; border-color: #42515d; }
 .leaflet-control-zoom a:hover { background: #344655; color: white; }
 .leaflet-container .leaflet-control-attribution { background: #19252a; color: #a5b2be; font-size: 10px; }
@@ -367,7 +368,6 @@ blockquote { background: #272a2e; }
 .node-count strong { color: #fff; }
 .geo-canvas, .map-surface { background: #000; }
 .geo-title, .geo-legend { background: #17191cf5; color: #f5f7fa; }
-.street-name { color: #d3dbe4; text-shadow: 0 1px 3px #000; }
 .geo-marker.device { background: #254335; color: #d0f8df; border-color: #98d6b0; }
 .geo-marker.device.unknown { background: #343c45; color: #edf2f8; border-color: #acbac9; }
 .geo-marker.device.offline { background: #57272a; color: #ffc7bf; border-color: #ff9b90; }

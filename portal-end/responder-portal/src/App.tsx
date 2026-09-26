@@ -5,14 +5,22 @@ import IncidentMap from './components/IncidentMap'
 import NavRail, { type AppView } from './components/NavRail'
 import MessagesView from './views/MessagesView'
 import { mockIncidents, mockNetworkNodes } from './data/mockIncidents'
+import type { AiResponder } from './types/incident'
+import { filterByResponders } from './utils/groupIncidents'
 import './App.css'
 
 function App() {
   const [incidents, setIncidents] = useState(mockIncidents)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedFilters, setSelectedFilters] = useState<AiResponder[]>([])
   const [view, setView] = useState<AppView>('home')
   const [peekUserId, setPeekUserId] = useState<number | null>(null)
   const [messagesUserId, setMessagesUserId] = useState<number | null>(null)
+
+  const filteredIncidents = useMemo(
+    () => filterByResponders(incidents, selectedFilters),
+    [incidents, selectedFilters],
+  )
 
   const seedUsers = useMemo(() => {
     const map = new Map<number, string | undefined>()
@@ -38,6 +46,15 @@ function App() {
         incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
       ),
     )
+  }
+
+  function changeFilters(next: AiResponder[]) {
+    setSelectedFilters(next)
+    setSelectedId(current => {
+      if (current == null) return current
+      const visible = filterByResponders(incidents, next)
+      return visible.some(incident => incident.id === current) ? current : null
+    })
   }
 
   function openMessages(userId: number) {
@@ -66,6 +83,9 @@ function App() {
             <div className="workspace">
               <IncidentQueue
                 incidents={incidents}
+                filteredIncidents={filteredIncidents}
+                selectedFilters={selectedFilters}
+                onFiltersChange={changeFilters}
                 selectedId={selectedId}
                 onSelect={selectIncident}
                 onClearSelect={() => setSelectedId(null)}
@@ -75,7 +95,7 @@ function App() {
                 onOpenMessages={openMessages}
               />
               <IncidentMap
-                incidents={incidents}
+                incidents={filteredIncidents}
                 selectedId={selectedId}
                 onSelectIncident={selectIncident}
               />

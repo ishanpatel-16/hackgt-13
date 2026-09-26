@@ -96,51 +96,23 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       })
       .then((data: FeatureCollection) => {
         if (controller.signal.aborted) return
-        L.geoJSON(data, {
+        // Buildings + parks only — road labels come from the basemap (custom markers looked wrong).
+        const overlay = {
+          type: 'FeatureCollection' as const,
+          features: data.features.filter(feature => {
+            const p = feature.properties
+            return Boolean(p?.building || p?.leisure)
+          }),
+        }
+        L.geoJSON(overlay, {
           interactive: false,
           style: feature => {
             const p = feature?.properties
-            return p?.building
-              ? { color: '#58616c', weight: 0.5, fillColor: '#353d47', fillOpacity: 0.75 }
-              : p?.leisure
-                ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: 0.65 }
-                : {
-                    color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#b4bdc8' : '#747f8d',
-                    weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2,
-                    opacity: 0.85,
-                  }
-          },
-          onEachFeature: (feature, layer) => {
-            if (
-              feature.properties?.name &&
-              feature.properties?.highway &&
-              ['primary', 'secondary', 'tertiary'].includes(feature.properties.highway)
-            ) {
-              const label = document.createElement('span')
-              label.textContent = feature.properties.name
-              layer.bindTooltip(label, { permanent: false, className: 'geo-label' })
-            }
+            return p?.leisure
+              ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: 0.55 }
+              : { color: '#58616c', weight: 0.4, fillColor: '#2c333c', fillOpacity: 0.7 }
           },
         }).addTo(map)
-        const names = new Set<string>()
-        data.features.forEach(feature => {
-          const p = feature.properties
-          if (
-            !p?.name ||
-            names.has(p.name) ||
-            !['primary', 'secondary'].includes(p.highway) ||
-            feature.geometry.type !== 'LineString'
-          )
-            return
-          names.add(p.name)
-          const point = feature.geometry.coordinates[Math.floor(feature.geometry.coordinates.length / 2)]
-          const label = document.createElement('span')
-          label.textContent = p.name
-          L.marker([point[1], point[0]], {
-            interactive: false,
-            icon: L.divIcon({ className: 'street-name', html: label, iconSize: [140, 20] }),
-          }).addTo(map)
-        })
       })
       .catch(error => {
         if (error.name !== 'AbortError') setMapError(true)
