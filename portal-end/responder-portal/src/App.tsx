@@ -1,51 +1,94 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Header from './components/Header'
 import IncidentQueue from './components/IncidentQueue'
 import IncidentMap from './components/IncidentMap'
-import IncidentDetails from './components/IncidentDetails'
-import AgentBrief from './components/AgentBrief'
-import NetworkStatus from './components/NetworkStatus'
-import { mockIncidents, mockNetworkNodes, mockBrief } from './data/mockIncidents'
-import NodeDetails from './components/NodeDetails'
-import { mockMapNodes } from './data/mockMapNodes'
-import MapPopup from './components/MapPopup'
+import NavRail, { type AppView } from './components/NavRail'
+import MessagesView from './views/MessagesView'
+import { mockIncidents, mockNetworkNodes } from './data/mockIncidents'
 import './App.css'
 
 function App() {
   const [incidents, setIncidents] = useState(mockIncidents)
-  const [selection, setSelection] = useState<{ kind: 'incident' | 'device'; id: string } | null>(null)
-  const selectedId = selection?.kind === 'incident' ? selection.id : null
-  const selectedNodeId = selection?.kind === 'device' ? selection.id : null
-  const selectedNode = mockMapNodes.find(node => node.id === selectedNodeId)
-  const selectedIncident = incidents.find(incident => incident.id === selectedId)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<AppView>('home')
+  const [peekUserId, setPeekUserId] = useState<number | null>(null)
+  const [messagesUserId, setMessagesUserId] = useState<number | null>(null)
+
+  const seedUsers = useMemo(() => {
+    const map = new Map<number, string | undefined>()
+    for (const incident of incidents) {
+      if (!map.has(incident.userId)) map.set(incident.userId, incident.userName)
+    }
+    return map
+  }, [incidents])
 
   function selectIncident(id: string) {
-    setSelection({ kind: 'incident', id })
+    setSelectedId(id)
+    setPeekUserId(null)
+    setIncidents(current =>
+      current.map(incident =>
+        incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
+      ),
+    )
   }
 
   function acknowledgeIncident(id: string) {
-    setIncidents(current => current.map(incident =>
-      incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
-    ))
+    setIncidents(current =>
+      current.map(incident =>
+        incident.id === id && incident.status === 'NEW' ? { ...incident, status: 'ACKNOWLEDGED' } : incident,
+      ),
+    )
+  }
+
+  function openMessages(userId: number) {
+    setPeekUserId(null)
+    setMessagesUserId(userId)
+    setView('messages')
+  }
+
+  function changeView(next: AppView) {
+    setView(next)
+    if (next === 'messages') {
+      setPeekUserId(null)
+      if (messagesUserId == null && seedUsers.size) {
+        setMessagesUserId([...seedUsers.keys()][0])
+      }
+    }
   }
 
   return (
-    <div className="dashboard">
-      <Header nodes={mockNetworkNodes} />
-      <main className="dashboard-content">
-        <div className="workspace">
-          <IncidentQueue incidents={incidents} selectedId={selectedId} onSelect={selectIncident} />
-          <IncidentMap nodes={mockNetworkNodes} incidents={incidents} selectedId={selectedId} selectedNodeId={selectedNodeId} onSelectNode={id => setSelection({ kind: 'device', id })} onSelectIncident={selectIncident}>
-            {selection && <MapPopup selectionKey={`${selection.kind}-${selection.id}`} label={selectedIncident ? `${selectedIncident.type} incident details` : `${selectedNode?.name} device details`} onClose={() => setSelection(null)}>
-              {selectedNode && <NodeDetails networkNodes={mockNetworkNodes} node={selectedNode} incidents={incidents} onSelectIncident={selectIncident} onClose={() => setSelection(null)} />}
-              {selectedIncident && <IncidentDetails key={selectedId} incident={selectedIncident} onAcknowledge={acknowledgeIncident} />}
-            </MapPopup>}
-          </IncidentMap>
-        </div>
-        <AgentBrief brief={mockBrief} />
-        <NetworkStatus nodes={mockNetworkNodes} />
-        <footer className="dashboard-footer"><span>net0 · Offline emergency communication</span><span>Development preview · Mock data</span></footer>
-      </main>
+    <div className="app-shell">
+      <NavRail view={view} onChange={changeView} />
+      <div className="dashboard">
+        <Header nodes={mockNetworkNodes} />
+        <main className={`dashboard-content ${view === 'messages' ? 'messages-mode' : ''}`}>
+          {view === 'home' ? (
+            <div className="workspace">
+              <IncidentQueue
+                incidents={incidents}
+                selectedId={selectedId}
+                onSelect={selectIncident}
+                onClearSelect={() => setSelectedId(null)}
+                onAcknowledge={acknowledgeIncident}
+                peekUserId={peekUserId}
+                onPeekUser={setPeekUserId}
+                onOpenMessages={openMessages}
+              />
+              <IncidentMap
+                incidents={incidents}
+                selectedId={selectedId}
+                onSelectIncident={selectIncident}
+              />
+            </div>
+          ) : (
+            <MessagesView
+              incidents={incidents}
+              selectedUserId={messagesUserId}
+              onSelectUser={setMessagesUserId}
+            />
+          )}
+        </main>
+      </div>
     </div>
   )
 }

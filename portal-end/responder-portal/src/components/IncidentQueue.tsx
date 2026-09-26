@@ -1,28 +1,244 @@
-import { getPrimaryResponse } from '../utils/primaryResponse'
-import type { Incident } from '../types/incident'
-import EmergencyIcon from './EmergencyIcon'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { AiResponder, Incident } from '../types/incident'
+import { filterByResponders, groupByUser, sortGroups, type IncidentSort } from '../utils/groupIncidents'
+import { useNow } from '../hooks/useRelativeTime'
+import ResponderFilter from './ResponderFilter'
+import UserIncidentGroupRow from './UserIncidentGroup'
+import ChatPeek from './ChatPeek'
+import IncidentDetails from './IncidentDetails'
 
 interface Props {
   incidents: Incident[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onClearSelect: () => void
+  onAcknowledge: (id: string) => void
+  peekUserId: number | null
+  onPeekUser: (userId: number | null) => void
+  onOpenMessages: (userId: number) => void
 }
 
-export default function IncidentQueue({ incidents, selectedId, onSelect }: Props) {
+export default function IncidentQueue({
+  incidents,
+  selectedId,
+  onSelect,
+  onClearSelect,
+  onAcknowledge,
+  peekUserId,
+  onPeekUser,
+  onOpenMessages,
+}: Props) {
+  const [selectedFilters, setSelectedFilters] = useState<AiResponder[]>([])
+  const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
+  const [sort, setSort] = useState<IncidentSort>('arrival')
+  const [sortOpen, setSortOpen] = useState(false)
+  const [caretY, setCaretY] = useState(48)
+  const sortMenuRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const peekRef = useRef<HTMLDivElement>(null)
+  const now = useNow()
+
+  const filtered = useMemo(
+    () => filterByResponders(incidents, selectedFilters),
+    [incidents, selectedFilters],
+  )
+  const groups = useMemo(
+    () => sortGroups(groupByUser(filtered), sort),
+    [filtered, sort],
+  )
+
+  const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
+  const selectedUserId = selectedIncident?.userId
+
+  useEffect(() => {
+    if (selectedUserId == null) return
+    setExpandedUsers(current => {
+      if (current.has(selectedUserId)) return current
+      const next = new Set(current)
+      next.add(selectedUserId)
+      return next
+    })
+  }, [selectedUserId])
+
+  useEffect(() => {
+    if (!sortOpen) return
+    function onPointerDown(event: PointerEvent) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) {
+        setSortOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [sortOpen])
+
+  useEffect(() => {
+    if (!selectedId || !panelRef.current) return
+    const feed = panelRef.current.querySelector('.incident-feed')
+    let observer: ResizeObserver | null = null
+
+    function updateCaret() {
+      const row = panelRef.current?.querySelector(`[data-report-id="${selectedId}"]`) as HTMLElement | null
+      const peek = peekRef.current
+      if (!row || !peek) return
+      const peekBox = peek.getBoundingClientRect()
+      const rowBox = row.getBoundingClientRect()
+      const rowMid = rowBox.top + rowBox.height / 2
+      const pad = 28
+      setCaretY(Math.max(pad, Math.min(rowMid - peekBox.top, peekBox.height - pad)))
+    }
+
+    const row = panelRef.current.querySelector(`[data-report-id="${selectedId}"]`) as HTMLElement | null
+    row?.scrollIntoView({ block: 'nearest' })
+
+    const frame = window.requestAnimationFrame(() => {
+      updateCaret()
+      if (peekRef.current) {
+        observer = new ResizeObserver(updateCaret)
+        observer.observe(peekRef.current)
+      }
+    })
+    feed?.addEventListener('scroll', updateCaret, { passive: true })
+    window.addEventListener('resize', updateCaret)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      feed?.removeEventListener('scroll', updateCaret)
+      window.removeEventListener('resize', updateCaret)
+      observer?.disconnect()
+    }
+  }, [selectedId, expandedUsers])
+
+  const peekGroup = peekUserId != null ? groups.find(g => g.userId === peekUserId) : undefined
+  const peekName =
+    peekGroup?.userName ??
+    incidents.find(i => i.userId === peekUserId)?.userName
+
+  function toggleUser(userId: number) {
+    setExpandedUsers(current => {
+      const next = new Set(current)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
+  }
+
   return (
-    <section className="panel queue-panel" aria-labelledby="queue-heading">
-      <div className="panel-heading"><h2 id="queue-heading">Incidents</h2><span className="small-label">{incidents.length} active</span></div>
-      <p className="queue-caption">Incoming reports · newest first</p>
-      <div className="incident-feed">
-        {incidents.map(incident => (
-          <button key={incident.id} className={`incident ${incident.type.toLowerCase()} ${selectedId === incident.id ? 'selected' : ''}`} aria-pressed={selectedId === incident.id} onClick={() => onSelect(incident.id)}>
-            <span className="incident-top"><span className={`incident-status ${incident.status.toLowerCase()}`}>{incident.status}</span><span className="incident-id">{incident.age}</span></span>
-            <span className="incident-title"><span className="emergency-icon"><EmergencyIcon type={incident.type} /></span><span className="queue-emergency"><strong>{incident.type}</strong><span>{incident.people} {incident.people === 1 ? 'person' : 'people'}</span></span><span className="small-label" aria-label={`Primary response: ${getPrimaryResponse(incident.type)}`}>{getPrimaryResponse(incident.type)}</span></span>
-            <span className="incident-details"><span><strong>{incident.placeName ?? incident.location}</strong><br />{incident.locationDetail && <>{incident.locationDetail}<br /></>}<small>SOS / {incident.id} · via Access Point {incident.node}</small></span></span>
-          </button>
-        ))}
-      </div>
-      <p className="queue-note">Select a report to inspect its location and details.</p>
-    </section>
+    <div className="queue-stack">
+      <section className="panel queue-panel" aria-labelledby="queue-heading" ref={panelRef}>
+        <div className="panel-heading">
+          <h2 id="queue-heading">Incidents</h2>
+          <div className="queue-heading-actions">
+            <span className="small-label">{filtered.length} reports</span>
+            <div className="sort-menu" ref={sortMenuRef}>
+              <button
+                type="button"
+                className={`sort-toggle ${sortOpen ? 'open' : ''}`}
+                aria-label="Sort incidents"
+                aria-haspopup="menu"
+                aria-expanded={sortOpen}
+                title="Sort"
+                onClick={() => setSortOpen(open => !open)}
+              >
+                <SortIcon />
+              </button>
+              {sortOpen && (
+                <div className="sort-dropdown" role="menu">
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sort === 'arrival'}
+                    className={sort === 'arrival' ? 'active' : ''}
+                    onClick={() => {
+                      setSort('arrival')
+                      setSortOpen(false)
+                    }}
+                  >
+                    Arrival time
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sort === 'priority'}
+                    className={sort === 'priority' ? 'active' : ''}
+                    onClick={() => {
+                      setSort('priority')
+                      setSortOpen(false)
+                    }}
+                  >
+                    Priority
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <ResponderFilter selected={selectedFilters} onChange={setSelectedFilters} />
+        <div className="incident-feed">
+          {groups.length === 0 ? (
+            <p className="queue-empty">No reports match these filters.</p>
+          ) : (
+            groups.map(group => (
+              <UserIncidentGroupRow
+                key={group.userId}
+                group={group}
+                now={now}
+                expanded={expandedUsers.has(group.userId)}
+                selectedId={selectedId}
+                onToggle={() => toggleUser(group.userId)}
+                onSelectReport={onSelect}
+                onMessage={userId => onPeekUser(peekUserId === userId ? null : userId)}
+                messaging={peekUserId === group.userId}
+              />
+            ))
+          )}
+        </div>
+      </section>
+
+      {selectedIncident && (
+        <div
+          className="report-detail-peek"
+          role="dialog"
+          aria-label="Report details"
+          ref={peekRef}
+          style={{ ['--peek-caret-y' as string]: `${caretY}px` }}
+        >
+          <span className="report-detail-peek-stem" aria-hidden />
+          <span className="report-detail-peek-caret" aria-hidden />
+          <div className="report-detail-peek-card">
+            <div className="report-detail-peek-header">
+              <strong>Report details</strong>
+              <button type="button" className="icon-btn" aria-label="Close details" onClick={onClearSelect}>
+                ×
+              </button>
+            </div>
+            <div className="report-detail-peek-body">
+              <IncidentDetails
+                key={selectedIncident.id}
+                incident={selectedIncident}
+                onAcknowledge={onAcknowledge}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {peekUserId != null && (
+        <ChatPeek
+          userId={peekUserId}
+          userName={peekName}
+          onClose={() => onPeekUser(null)}
+          onOpenFull={() => onOpenMessages(peekUserId)}
+        />
+      )}
+    </div>
+  )
+}
+
+function SortIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M2 4h8M2 8h5M2 12h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M11 3.5v9M11 12.5l2.2-2.2M11 12.5l-2.2-2.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }

@@ -1,155 +1,260 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import L from 'leaflet'
 import type { FeatureCollection } from 'geojson'
 import 'leaflet/dist/leaflet.css'
-import { mockMapNodes } from '../data/mockMapNodes'
-import { mockDeviceCoordinates } from '../data/mockDeviceCoordinates'
-import { deviceName } from '../utils/networkLabels'
 import type { Incident } from '../types/incident'
-import type { NetworkNode } from '../types/network'
 
 interface Props {
   incidents: Incident[]
-  nodes: NetworkNode[]
   selectedId: string | null
-  selectedNodeId: string | null
-  onSelectNode: (id: string) => void
   onSelectIncident: (id: string) => void
-  children?: ReactNode
 }
 
 function coordinates(incident: Incident): L.LatLngTuple | null {
   const values = incident.location.split(',').map(Number)
   return values.length === 2 && values.every(Number.isFinite) && Math.abs(values[0]) <= 90 && Math.abs(values[1]) <= 180
-    ? [values[0], values[1]] : null
+    ? [values[0], values[1]]
+    : null
 }
 
-export default function IncidentMap({ incidents, nodes, selectedId, selectedNodeId, onSelectNode, onSelectIncident, children }: Props) {
+function leftChromeWidth(map: L.Map): number {
+  const workspace = map.getContainer().closest('.workspace') as HTMLElement | null
+  const queue = workspace?.querySelector('.queue-panel') as HTMLElement | null
+  const peek = workspace?.querySelector('.report-detail-peek') as HTMLElement | null
+  const queueW = queue?.getBoundingClientRect().width ?? 380
+  const peekW = peek ? peek.getBoundingClientRect().width + 12 : 0
+  return queueW + peekW + 24
+}
+
+function flyPinIntoView(map: L.Map, latlng: L.LatLngExpression, animate: boolean) {
+  const zoom = Math.max(map.getZoom(), 16)
+  const size = map.getSize()
+  const left = leftChromeWidth(map)
+  const visible = Math.max(160, size.x - left)
+  const desiredX = left + visible * 0.55
+  const projected = map.project(latlng, zoom)
+  const centerPoint = L.point(projected.x - desiredX + size.x / 2, projected.y)
+  const center = map.unproject(centerPoint, zoom)
+  if (animate) {
+    map.flyTo(center, zoom, { animate: true, duration: 0.35, easeLinearity: 0.35 })
+  } else {
+    map.setView(center, zoom, { animate: false })
+  }
+}
+
+function markerSymbol(incident: Incident): string {
+  return incident.type === 'Medical' ? '+' : incident.type === 'Fire' ? '♨' : incident.type === 'Trapped' ? '!' : '•'
+}
+
+function markerClasses(incident: Incident, selectedId: string | null): string {
+  return `geo-marker sos ${incident.type.toLowerCase()} ${incident.status === 'NEW' ? 'new' : ''} ${selectedId === incident.id ? 'chosen' : ''}`.trim()
+}
+
+export default function IncidentMap({ incidents, selectedId, onSelectIncident }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
-  const [popupHost] = useState(() => document.createElement('div'))
+  const markersRef = useRef<Map<string, { marker: L.Marker; button: HTMLButtonElement }>>(new Map())
+  const layerRef = useRef<L.LayerGroup | null>(null)
+  const selectRef = useRef(onSelectIncident)
+  const selectedRef = useRef(selectedId)
+  const firstSelect = useRef(true)
   const [mapError, setMapError] = useState(false)
 
+  selectRef.current = onSelectIncident
+  selectedRef.current = selectedId
+
   useEffect(() => {
-    const map = L.map(host.current!, { center: [33.771, -84.387], zoom: 15, zoomSnap: 0.25, zoomDelta: 0.5, minZoom: 14, maxZoom: 19, bounceAtZoomLimits: false, maxBounds: [[33.75, -84.405], [33.79, -84.365]], maxBoundsViscosity: 1, zoomControl: false, preferCanvas: true })
+    const map = L.map(host.current!, {
+      center: [33.771, -84.387],
+      zoom: 15,
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+      minZoom: 11,
+      maxZoom: 19,
+      bounceAtZoomLimits: false,
+      zoomControl: false,
+      preferCanvas: true,
+    })
     mapRef.current = map
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     map.attributionControl.setPrefix(false)
-    map.attributionControl.addAttribution('© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · Local extract')
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_3z1f_1_5d09fcb81bc5744792fbd5f9', {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(map)
+
+    layerRef.current = L.layerGroup().addTo(map)
+
     const controller = new AbortController()
     fetch(`${import.meta.env.BASE_URL}maps/atlanta.geojson`, { signal: controller.signal })
-      .then(response => { if (!response.ok) throw Error('Local map unavailable'); return response.json() })
+      .then(response => {
+        if (!response.ok) throw Error('Local map unavailable')
+        return response.json()
+      })
       .then((data: FeatureCollection) => {
         if (controller.signal.aborted) return
         L.geoJSON(data, {
           interactive: false,
           style: feature => {
             const p = feature?.properties
-            return p?.building ? { color: '#58616c', weight: .5, fillColor: '#353d47', fillOpacity: .9 }
-              : p?.leisure ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: .8 }
-              : { color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#b4bdc8' : '#747f8d', weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2, opacity: .85 }
+            return p?.building
+              ? { color: '#58616c', weight: 0.5, fillColor: '#353d47', fillOpacity: 0.75 }
+              : p?.leisure
+                ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: 0.65 }
+                : {
+                    color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#b4bdc8' : '#747f8d',
+                    weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2,
+                    opacity: 0.85,
+                  }
           },
           onEachFeature: (feature, layer) => {
-            if (feature.properties?.name && feature.properties?.highway && ['primary', 'secondary', 'tertiary'].includes(feature.properties.highway)) {
+            if (
+              feature.properties?.name &&
+              feature.properties?.highway &&
+              ['primary', 'secondary', 'tertiary'].includes(feature.properties.highway)
+            ) {
               const label = document.createElement('span')
               label.textContent = feature.properties.name
               layer.bindTooltip(label, { permanent: false, className: 'geo-label' })
             }
           },
-        }).addTo(map).bringToBack()
-        // Sparse permanent geographic labels from real named roads, not invented places.
+        }).addTo(map)
         const names = new Set<string>()
         data.features.forEach(feature => {
           const p = feature.properties
-          if (!p?.name || names.has(p.name) || !['primary', 'secondary'].includes(p.highway) || feature.geometry.type !== 'LineString') return
+          if (
+            !p?.name ||
+            names.has(p.name) ||
+            !['primary', 'secondary'].includes(p.highway) ||
+            feature.geometry.type !== 'LineString'
+          )
+            return
           names.add(p.name)
           const point = feature.geometry.coordinates[Math.floor(feature.geometry.coordinates.length / 2)]
-          const label = document.createElement('span'); label.textContent = p.name
-          L.marker([point[1], point[0]], { interactive: false, icon: L.divIcon({ className: 'street-name', html: label, iconSize: [140, 20] }) }).addTo(map)
+          const label = document.createElement('span')
+          label.textContent = p.name
+          L.marker([point[1], point[0]], {
+            interactive: false,
+            icon: L.divIcon({ className: 'street-name', html: label, iconSize: [140, 20] }),
+          }).addTo(map)
         })
-      }).catch(error => { if (error.name !== 'AbortError') setMapError(true) })
-    // Keep the entire viewport inside the bundled geography. A fixed minimum
-    // zoom exposed blank edges on wide screens and after resizing the window.
-    const coverage = L.latLngBounds([33.75, -84.405], [33.79, -84.365])
-    const updateCoverage = () => {
-      map.invalidateSize({ pan: false })
-      const minimum = map.getBoundsZoom(coverage, true)
-      map.setMinZoom(minimum)
-      if (map.getZoom() < minimum) map.setZoom(minimum, { animate: false })
-      map.panInsideBounds(coverage, { animate: false })
-    }
-    updateCoverage()
-    const observer = new ResizeObserver(updateCoverage)
+      })
+      .catch(error => {
+        if (error.name !== 'AbortError') setMapError(true)
+      })
+
+    const onResize = () => map.invalidateSize({ pan: false })
+    onResize()
+    const observer = new ResizeObserver(onResize)
     observer.observe(host.current!)
-    return () => { controller.abort(); observer.disconnect(); map.remove(); mapRef.current = null }
+    return () => {
+      controller.abort()
+      observer.disconnect()
+      map.remove()
+      mapRef.current = null
+      layerRef.current = null
+      markersRef.current.clear()
+    }
   }, [])
 
+  // Build / refresh markers only when the incident list changes — not on selection.
   useEffect(() => {
-    const map = mapRef.current!
-    const layers = L.layerGroup().addTo(map)
-    const status = (name: string) => nodes.find(node => deviceName(node.name) === deviceName(name))?.status
-    const marker = (point: L.LatLngTuple, label: string, symbol: string, classes: string, action: () => void) => {
-      const button = document.createElement('button')
-      button.type = 'button'; button.className = `geo-marker ${classes}`
-      button.textContent = symbol; button.setAttribute('aria-label', label); button.title = label
-      button.onclick = event => { event.stopPropagation(); action() }
-      return L.marker(point, { icon: L.divIcon({ className: 'geo-marker-host', html: button, iconSize: [36, 36], iconAnchor: [18, 18] }), keyboard: false }).addTo(layers)
-    }
-    const seen = new Set<string>()
-    mockMapNodes.forEach(node => {
-      const point = mockDeviceCoordinates[node.id]
-      node.connections.forEach(name => {
-        const other = mockMapNodes.find(item => item.name === name)
-        if (!other) return
-        const key = [node.id, other.id].sort().join('-')
-        if (seen.has(key)) return
-        seen.add(key)
-        const offline = status(node.name) === 'OFFLINE' || status(other.name) === 'OFFLINE'
-        L.polyline([point, mockDeviceCoordinates[other.id]], { color: offline ? '#77504f' : '#91b8a6', weight: 1, opacity: offline ? .25 : .4, dashArray: '4 7', interactive: false }).addTo(layers)
-      })
-      const state = status(node.name)
-      marker(point, `${deviceName(node.name)} — ${state ?? 'status unavailable'}`, node.role === 'Gateway' ? '⌂' : node.role === 'Relay' ? '↔' : 'A', `device ${state?.toLowerCase() ?? 'unknown'} ${selectedNodeId === node.id ? 'chosen' : ''}`, () => onSelectNode(node.id))
-    })
-    const selected = incidents.find(incident => incident.id === selectedId)
-    if (selected) {
-      const path = selected.path.map(name => mockMapNodes.find(node => node.name === name))
-      const origin = coordinates(selected)
-      if (origin && path.every(node => node !== undefined)) {
-        const points = [origin, ...path.map(node => mockDeviceCoordinates[node!.id])]
-        const interrupted = path.some(node => status(node!.name) === 'OFFLINE')
-        L.polyline(points, { color: interrupted ? '#d59b76' : '#c8e3f5', weight: 3, opacity: .9, dashArray: interrupted ? '4 8' : undefined, interactive: false }).addTo(layers)
+    const map = mapRef.current
+    const layers = layerRef.current
+    if (!map || !layers) return
+
+    const nextIds = new Set(incidents.map(i => i.id))
+    for (const [id, entry] of markersRef.current) {
+      if (!nextIds.has(id)) {
+        layers.removeLayer(entry.marker)
+        markersRef.current.delete(id)
       }
     }
+
     incidents.forEach(incident => {
       const point = coordinates(incident)
       if (!point) return
-      marker(point, `${incident.type} SOS ${incident.id}, ${incident.people} people`, incident.type === 'Medical' ? '+' : incident.type === 'Fire' ? '♨' : incident.type === 'Trapped' ? '!' : '•', `sos ${incident.type.toLowerCase()} ${incident.status === 'NEW' ? 'new' : ''} ${selectedId === incident.id ? 'chosen' : ''}`, () => onSelectIncident(incident.id))
+      const existing = markersRef.current.get(incident.id)
+      if (existing) {
+        const current = existing.marker.getLatLng()
+        if (current.lat !== point[0] || current.lng !== point[1]) {
+          existing.marker.setLatLng(point)
+        }
+        existing.button.className = markerClasses(incident, selectedRef.current)
+        existing.button.textContent = markerSymbol(incident)
+        existing.button.title = `${incident.type} SOS ${incident.id}, ${incident.people} people`
+        existing.button.setAttribute('aria-label', existing.button.title)
+        return
+      }
+
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = markerClasses(incident, selectedRef.current)
+      button.textContent = markerSymbol(incident)
+      button.title = `${incident.type} SOS ${incident.id}, ${incident.people} people`
+      button.setAttribute('aria-label', button.title)
+      button.onclick = event => {
+        event.stopPropagation()
+        selectRef.current(incident.id)
+      }
+      const marker = L.marker(point, {
+        icon: L.divIcon({ className: 'geo-marker-host', html: button, iconSize: [36, 36], iconAnchor: [18, 18] }),
+        keyboard: false,
+      }).addTo(layers)
+      markersRef.current.set(incident.id, { marker, button })
     })
-    return () => { layers.remove() }
-  }, [incidents, nodes, selectedId, selectedNodeId, onSelectNode, onSelectIncident])
+  }, [incidents])
 
+  // Selection highlight only — no marker teardown.
   useEffect(() => {
-    const map = mapRef.current!
-    const incident = incidents.find(item => item.id === selectedId)
-    const point = incident ? coordinates(incident) : selectedNodeId ? mockDeviceCoordinates[selectedNodeId] : null
-    if (!point) return
-    map.panTo(point, { animate: false })
-    const popup = L.popup({ closeButton: false, autoClose: false, closeOnClick: false, closeOnEscapeKey: false, maxWidth: 340, minWidth: 260, maxHeight: 400, offset: [0, -20], autoPanPadding: [24, 24], className: 'net0-map-popup' }).setLatLng(point).setContent(popupHost).openOn(map)
-    return () => { popup.remove() }
-  }, [selectedId, selectedNodeId, popupHost, incidents])
+    for (const [id, entry] of markersRef.current) {
+      entry.button.classList.toggle('chosen', id === selectedId)
+    }
+  }, [selectedId, incidents])
 
-  const interrupted = incidents.find(item => item.id === selectedId)?.path.some(name => nodes.some(node => deviceName(node.name) === deviceName(name) && node.status === 'OFFLINE'))
+  // Smooth pan when the selected report changes (not when only status updates).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !selectedId) return
+    const entry = markersRef.current.get(selectedId)
+    if (!entry) return
+    const point = entry.marker.getLatLng()
+    const frame = window.requestAnimationFrame(() => {
+      flyPinIntoView(map, point, !firstSelect.current)
+      firstSelect.current = false
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [selectedId])
+
+  function fitIncidents() {
+    const points = incidents.flatMap(incident => {
+      const point = coordinates(incident)
+      return point ? [point] : []
+    })
+    if (!points.length || !mapRef.current) return
+    const map = mapRef.current
+    const left = leftChromeWidth(map)
+    map.fitBounds(L.latLngBounds(points).pad(0.15), {
+      paddingTopLeft: [left, 32],
+      paddingBottomRight: [32, 32],
+      animate: true,
+      duration: 0.35,
+    })
+  }
+
   return (
-    <section className="panel map-panel geographic-panel" aria-label="Live Incident Map">
+    <section className="panel map-panel geographic-panel" aria-label="Incident map">
       <div className="geo-canvas" ref={host} />
-      <div className="geo-title"><h2>Live Incident Map</h2><span>Atlanta · Local map</span></div>
-      <button className="fit-network" onClick={() => mapRef.current?.fitBounds(L.latLngBounds([...Object.values(mockDeviceCoordinates), ...incidents.flatMap(incident => { const point = coordinates(incident); return point ? [point] : [] })]).pad(.15))}>Fit network</button>
+      <button type="button" className="fit-network" onClick={fitIncidents} aria-label="Fit incidents" title="Fit incidents">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+          <path d="M2 6V2h4M12 2h4v4M16 12v4h-4M6 16H2v-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="9" cy="9" r="2.25" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      </button>
       {mapError && <p className="geo-warning">Local map could not load. Emergency markers remain available.</p>}
-      {interrupted && <p className="geo-warning">A device on this report’s path is offline. Delivery through another route is not confirmed.</p>}
-      <div className="geo-legend">SOS · A Access Point · ↔ Relay · ⌂ Responder Station</div>
-      {createPortal(children, popupHost)}
     </section>
   )
 }
