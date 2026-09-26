@@ -52,9 +52,24 @@ static void trim(char *s) {
 }
 
 // Reads `key` from a query string or form body into out (decoded). "" if missing.
+// Too-long values are cut to fit. Not httpd_query_key_value(): in IDF 5.5 it copies
+// NOTHING when the value doesn't fit, which silently dropped the phone's
+// full-precision lat/lon ("-84.39628601074219" > 16 bytes).
 static void getParam(const char *src, const char *key, char *out, size_t outLen) {
   out[0] = '\0';  // stays empty if the key is missing
-  httpd_query_key_value(src, key, out, outLen);  // too-long values come back truncated
+  size_t keyLen = strlen(key);
+  for (const char *p = src; *p;) {
+    const char *end = strchr(p, '&');
+    if (!end) end = p + strlen(p);
+    if ((size_t)(end - p) > keyLen && p[keyLen] == '=' && !strncmp(p, key, keyLen)) {
+      const char *val = p + keyLen + 1;
+      size_t n = min((size_t)(end - val), outLen - 1);
+      memcpy(out, val, n);
+      out[n] = '\0';
+      break;
+    }
+    p = *end ? end + 1 : end;
+  }
   urlDecode(out);
 }
 
