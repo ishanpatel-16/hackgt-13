@@ -23,6 +23,6 @@
 
 3 Portal-end (Frontend Server)
 - Install npm (https://nodejs.org/en/download)
-- CD inside portal-end/frontend
+- CD inside portal-end/responder-portal
 - Alvy setup react in here please (I'm no expert 😞)
     - *What do I need to install?*
