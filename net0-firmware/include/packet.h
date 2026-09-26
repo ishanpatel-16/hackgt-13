@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define NET0_MAGIC    0x4E30  // "N0" — anything else is dropped
-#define NET0_VERSION  4       // v4: GPS fields
+#define NET0_VERSION  5       // v5: category + people
 
 // Packet types. Same numbers as the backend (portal-end/backend/packet_codec.py)
 // so a type means the same thing on the mesh and over Bluetooth.
@@ -41,6 +41,8 @@ typedef struct __attribute__((packed)) {
   uint8_t  ttl;                   // hops left
   uint16_t user_id;               // phone's user ID (reports only, 0 = unknown)
   uint32_t ref_id;                // ACK: the report msg_id being acknowledged
+  uint8_t  category;              // reports: backend Category (0 unknown, 1 medical, 2 trapped, 3 fire, 8 other)
+  uint8_t  people;                // reports: people needing help (0 = unknown)
   uint8_t  has_gps;               // reports: 1 if lat/lon/accuracy_m are set
   float    lat;                   // degrees, from the phone's browser (HTTPS page only)
   float    lon;

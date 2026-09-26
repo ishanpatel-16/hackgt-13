@@ -42,11 +42,11 @@ Phone → Node (Wi-Fi AP + web form) → other Node(s) relaying → Gateway ESP3
 - **ESP-NOW receive callback:** only copy the packet into a FreeRTOS queue. Process it in `loop()`. Never do slow work (Serial, delays, sends) inside the callback.
 - **Callback signature (core 3.x):** `void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len)`. RSSI comes from `info->rx_ctrl->rssi`.
 
-## Packet (`include/packet.h`, packed struct, version 4)
+## Packet (`include/packet.h`, packed struct, version 5)
 | Field | Type | Notes |
 |---|---|---|
 | magic | uint16 | `0x4E30`, drop anything else |
-| version | uint8 | `4` |
+| version | uint8 | `5` |
 | type | uint8 | `1` = report, `2` = user_reply (reserved), `3` = heartbeat, `4` = ack, `5` = message (reserved). **Same numbers as the backend's `packet_codec.py`.** |
 | msg_id | uint32 | random, never 0. **Same on every retry of a report** |
 | attempt | uint8 | 0 = first send, +1 per retry |
@@ -55,6 +55,8 @@ Phone → Node (Wi-Fi AP + web form) → other Node(s) relaying → Gateway ESP3
 | ttl | uint8 | default 6 |
 | user_id | uint16 | phone's user ID (reports), 0 = unknown |
 | ref_id | uint32 | ack: the report `msg_id` being acknowledged |
+| category | uint8 | reports: backend `Category` (0 unknown, 1 medical, 2 trapped, 3 fire, 8 other), picked on the phone |
+| people | uint8 | reports: people needing help (0 = unknown) |
 | has_gps, lat, lon, accuracy_m | uint8, float, float, uint16 | reports: phone GPS fix (HTTPS page only) |
 | path_len, path[8] | uint8 | node IDs the packet passed through, in order |
 | location | char[64] | user-typed text (GPS later) |
@@ -75,6 +77,9 @@ Goal: the same phone keeps the same `user_id` (1–65535) whenever possible.
 2. The phone's Wi-Fi sign-in popup (captive portal) wipes that storage each time it reopens, so the node also remembers **phone Wi-Fi MAC → user_id** in flash (NVS namespace `users`, survives reboots). On load the page calls `GET /whoami?id=<stored or 0>`; `/send` does the same resolution.
 3. Priority: the page's stored ID > the ID remembered for this MAC > a new random ID.
 - Phones use a fixed private MAC per network name, so reconnecting to the **same node** gets the same ID. A **different node** (different network name) sees a different MAC → new ID, unless the browser kept its storage. This is accepted.
+
+## Phone page (`data/`)
+Design from the team's initial user portal (was `user-end/node-esp/data/web-portal/`, commit e33013a). Flow: pick emergency type (Medical / Fire / Trapped / Other → `category`) and people count, optional location text + GPS, details (required for "Other"), then SEND → `POST /send`. The confirmation screen polls `/status` and flips from "SOS SENT" (amber) to "SOS DELIVERED" (green) on the gateway's ACK. "Send an update" goes back to the form keeping type/people/location (sent as a new report until `user_reply` exists). `/whoami` also returns the node ID for the "Connected to local node N" badge.
 
 ## HTTPS + GPS
 Browsers only share location with secure (`https://`) pages.
@@ -102,7 +107,7 @@ Current setup: 3 boards in a line, `node2 → node1 → gateway`. Every node is 
 The backend (`portal-end/backend/packets/esp_manager.py`, Ishan) scans for BLE service `7b2f3a91-8c64-4f2e-a7d1-91c8e7b5d421`, device `Gateway-Node`, and subscribes to notifications on characteristic `a12b3c45-6789-4def-8123-456789abcdef`. The gateway keeps advertising while connected, so up to 3 laptops can connect at once (otherwise the first connection hides it from everyone else). These UUIDs are BLE identifiers, unrelated to the mesh `NODE_ID`.
 - **Uplink (gateway → backend):** notifications carrying frames `[uint16 len][payload]`, split into MTU-sized chunks. Payload layouts are defined by `portal-end/backend/packets/packet_codec.py` (report = type 1, 705 B; heartbeat = type 3, 23 B). `src/gateway/backend_codec.h` must match it.
 - **Downlink (backend → gateway):** writes to the same characteristic (acks, type 4). The gateway turns each into a mesh `PKT_ACK`.
-- Fields our mesh packet doesn't carry yet (name, phone, category, severity, people, needs, clients, uptime, tx/rx, neighbors) are sent as unknown/0. Severity stays 0 (unknown) on purpose: the dashboard AI will decide it later. `user_id` comes from the phone (falls back to one derived from `msg_id` if 0). The gateway (ID 0) is **not** added to `path` because the backend only accepts node IDs 1–254.
+- Fields our mesh packet doesn't carry yet (name, phone, severity, needs, clients, uptime, tx/rx, neighbors) are sent as unknown/0. Severity stays 0 (unknown) on purpose: the dashboard AI will decide it later. `user_id` comes from the phone (falls back to one derived from `msg_id` if 0). The gateway (ID 0) is **not** added to `path` because the backend only accepts node IDs 1–254.
 - USB serial (115200) still prints one JSON line per packet for debugging:
 ```json
 {"type":"report","msg_id":"A83F29C1","origin":2,"hops":2,"rssi":-48,"path":[2,1,0],"location":"Klaus, Floor 3","message":"Two people trapped, one injured"}

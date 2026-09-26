@@ -64,9 +64,9 @@ static inline size_t bkEncodeReport(const Packet &p, uint8_t *out) {
   w.u8(p.origin);
   w.path(p);
   w.u16(bkUserId(p));
-  w.u8(0);            // category: unknown
+  w.u8(p.category);
   w.u8(0);            // severity: unknown (left empty; the dashboard AI decides it later)
-  w.u8(0);            // people: unknown
+  w.u8(p.people);
   w.u8(0);            // needs: none
   w.u8(p.has_gps ? 1 : 0);
   w.f32(p.has_gps ? p.lat : 0);

@@ -61,6 +61,10 @@ static void printJson(const Packet &p, int rssi) {
   if (p.type == PKT_REPORT) {
     out += ",\"user_id\":";
     out += p.user_id;
+    out += ",\"category\":";
+    out += p.category;
+    out += ",\"people\":";
+    out += p.people;
 
     if (p.has_gps) {
       char gps[80];

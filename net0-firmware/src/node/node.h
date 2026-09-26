@@ -11,8 +11,17 @@ struct GpsFix {
   uint16_t accuracy_m;
 };
 
+struct ReportInfo {
+  uint16_t userId;
+  uint8_t category;  // backend Category number, 0 = unknown
+  uint8_t people;    // 0 = unknown
+  const char *location;
+  const char *message;
+  GpsFix gps;
+};
+
 // Floods a new report and keeps retrying it until ACKed. Returns its msg_id.
-uint32_t nodeSendReport(uint16_t userId, const char *location, const char *message, const GpsFix &gps);
+uint32_t nodeSendReport(const ReportInfo &r);
 
 // False if the msg_id is unknown (never sent here, or pushed out of the list).
 bool nodeReportStatus(uint32_t msgId, bool &delivered, uint8_t &attempts);

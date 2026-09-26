@@ -161,12 +161,17 @@ static esp_err_t handleWhoami(httpd_req_t *req) {
   char idArg[8];
   getQuery(req, "id", idArg, sizeof(idArg));
   char json[96];
-  snprintf(json, sizeof(json), "{\"user_id\":%u,\"https\":%s}", resolveUserId(req, parseUserId(idArg)),
-           httpsServer ? "\"https://" HTTPS_HOST "/\"" : "null");
+  snprintf(json, sizeof(json), "{\"user_id\":%u,\"node\":%d,\"https\":%s}", resolveUserId(req, parseUserId(idArg)),
+           NODE_ID, httpsServer ? "\"https://" HTTPS_HOST "/\"" : "null");
   return sendJson(req, "200 OK", json);
 }
 
-// POST /send  (form fields: location, message, id, lat, lon, acc)
+// Backend Category numbers we accept (portal-end/backend/packets/serial_schema.py).
+static bool validCategory(long c) {
+  return c >= 0 && c <= 8;
+}
+
+// POST /send  (form fields: category, people, location, message, id, lat, lon, acc)
 static esp_err_t handleSend(httpd_req_t *req) {
   char body[2048];
   if (req->content_len >= sizeof(body)) return sendJson(req, "413 Payload Too Large", "{\"error\":\"Report too long\"}");
@@ -179,6 +184,9 @@ static esp_err_t handleSend(httpd_req_t *req) {
   body[got] = '\0';
 
   char location[LOCATION_LEN * 3], message[MESSAGE_LEN * 3], idArg[8], lat[16], lon[16], acc[8];
+  char categoryArg[4], peopleArg[6];
+  getParam(body, "category", categoryArg, sizeof(categoryArg));
+  getParam(body, "people", peopleArg, sizeof(peopleArg));
   getParam(body, "location", location, sizeof(location));
   getParam(body, "message", message, sizeof(message));
   getParam(body, "id", idArg, sizeof(idArg));
@@ -187,7 +195,12 @@ static esp_err_t handleSend(httpd_req_t *req) {
   getParam(body, "acc", acc, sizeof(acc));
   trim(location);
   trim(message);
-  if (!message[0]) return sendJson(req, "400 Bad Request", "{\"error\":\"Message is empty\"}");
+  long category = atol(categoryArg);
+  long people = atol(peopleArg);
+  if (!validCategory(category)) category = 0;
+  people = constrain(people, 0L, 255L);
+  // An emergency type alone is a valid SOS; otherwise we need some text.
+  if (!category && !message[0]) return sendJson(req, "400 Bad Request", "{\"error\":\"Pick an emergency type\"}");
 
   GpsFix gps = {};
   if (lat[0] && lon[0]) {
@@ -198,11 +211,12 @@ static esp_err_t handleSend(httpd_req_t *req) {
   }
 
   uint16_t userId = resolveUserId(req, parseUserId(idArg));
-  uint32_t msgId = nodeSendReport(userId, location, message, gps);
+  uint32_t msgId = nodeSendReport({userId, (uint8_t)category, (uint8_t)people, location, message, gps});
+  Serial.printf("[web] report %08X from user %u, category %ld, %ld people, ", msgId, userId, category, people);
   if (gps.valid)
-    Serial.printf("[web] report %08X from user %u with GPS %.6f, %.6f (+/-%u m)\n", msgId, userId, gps.lat, gps.lon, gps.accuracy_m);
+    Serial.printf("GPS %.6f, %.6f (+/-%u m)\n", gps.lat, gps.lon, gps.accuracy_m);
   else
-    Serial.printf("[web] report %08X from user %u, no GPS (lat='%s' lon='%s')\n", msgId, userId, lat, lon);
+    Serial.printf("no GPS (lat='%s' lon='%s')\n", lat, lon);
 
   char json[80];
   snprintf(json, sizeof(json), "{\"msg_id\":\"%08X\",\"user_id\":%u,\"gps\":%s}", msgId, userId,

@@ -49,19 +49,21 @@ static void transmit(Packet &p) {
   Serial.printf("[tx] %s id=%08X attempt=%u\n", typeName(p.type), p.msg_id, p.attempt);
 }
 
-uint32_t nodeSendReport(uint16_t userId, const char *location, const char *message, const GpsFix &gps) {
+uint32_t nodeSendReport(const ReportInfo &r) {
   xSemaphoreTake(lock, portMAX_DELAY);
   Pending &e = takeSlot();
   e.used = true;
   e.delivered = false;
   e.pkt = newPacket(PKT_REPORT);
-  e.pkt.user_id = userId;
-  e.pkt.has_gps = gps.valid;
-  e.pkt.lat = gps.lat;
-  e.pkt.lon = gps.lon;
-  e.pkt.accuracy_m = gps.accuracy_m;
-  strlcpy(e.pkt.location, location, LOCATION_LEN);
-  strlcpy(e.pkt.message, message, MESSAGE_LEN);
+  e.pkt.user_id = r.userId;
+  e.pkt.category = r.category;
+  e.pkt.people = r.people;
+  e.pkt.has_gps = r.gps.valid;
+  e.pkt.lat = r.gps.lat;
+  e.pkt.lon = r.gps.lon;
+  e.pkt.accuracy_m = r.gps.accuracy_m;
+  strlcpy(e.pkt.location, r.location, LOCATION_LEN);
+  strlcpy(e.pkt.message, r.message, MESSAGE_LEN);
   e.interval = RETRY_FIRST_MS;
   e.nextSend = millis() + e.interval;
   transmit(e.pkt);
