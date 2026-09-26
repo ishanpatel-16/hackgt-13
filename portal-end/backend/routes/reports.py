@@ -66,7 +66,7 @@ def _ensure_user(db: Session, user_id: int, name: str = "", phone: str = ""):
     return user
 
 
-@router.get("", response_model=list[ReportList])
+@router.get("", response_model=list[ReportDetail])
 def list_reports(
     user_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
