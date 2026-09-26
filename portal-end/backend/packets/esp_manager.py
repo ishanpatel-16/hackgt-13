@@ -3,8 +3,8 @@ import logging
 
 from bleak import BleakClient, BleakScanner
 
-from packet_codec import decode_uplink, feed_frames
-from packet_handler import handle_uplink
+from packets.packet_codec import decode_uplink, feed_frames
+from packets.packet_handler import handle_uplink
 
 # -- configuration --
 # bluetooth gateway connection

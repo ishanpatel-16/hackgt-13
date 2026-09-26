@@ -6,7 +6,7 @@ the backend sends JSON lines back. This file is the single source of truth for
 that JSON on the Python side. If packets.h changes, change this too.
 
 Usage:
-    from serial_schema import parse_uplink, dump_downlink, Report, Heartbeat, UserReply, Ack, Message
+    from packets.serial_schema import parse_uplink, dump_downlink, Report, Heartbeat, UserReply, Ack, Message
 
     pkt = parse_uplink(line)          # -> Report | UserReply | Heartbeat, or raises ValidationError
     ser.write(dump_downlink(Ack(target_node=1, user_id=4821, acked_msg_id=pkt.msg_id)))

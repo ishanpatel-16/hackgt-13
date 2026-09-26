@@ -3,7 +3,7 @@
 Seed local SQLite from seed_data.json.
 
 Usage:
-  python scripts/seed_db.py                  # reads ../seed_data.json (merge mode)
+  python scripts/seed_db.py                  # reads data/seed_data.json (merge mode)
   python scripts/seed_db.py --replace        # wipes tables first
   python scripts/seed_db.py --in my.json
   python scripts/seed_db.py --from-api       # fetch from running server http://localhost:8000/api/debug/export
@@ -185,7 +185,7 @@ def seed(data, mode="merge"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="infile", default=None, help="input json (default: backend/seed_data.json)")
+    ap.add_argument("--in", dest="infile", default=None, help="input json (default: backend/data/seed_data.json)")
     ap.add_argument("--replace", action="store_true", help="wipe before seed")
     ap.add_argument("--from-api", action="store_true", help="fetch from http://localhost:8000/api/debug/export")
     ap.add_argument("--api-url", default="http://localhost:8000/api/debug/export")
@@ -201,7 +201,7 @@ def main():
         seed(data, mode=mode)
         return
 
-    infile = Path(args.infile) if args.infile else BACKEND_DIR / "seed_data.json"
+    infile = Path(args.infile) if args.infile else BACKEND_DIR / "data" / "seed_data.json"
     if not infile.exists():
         print(f"no {infile} found — nothing to seed. Run scripts/export_db.py first or check API.")
         # also try to create empty template

@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-import esp_manager
 from database import Base, engine
 from models import Message, Node, Report, User  # noqa: F401
-from packet_handler import mark_stale_nodes_offline
+from packets import esp_manager
+from packets.packet_handler import mark_stale_nodes_offline
 
 # routers
 from routes import debug_router, messages_router, nodes_router, reports_router, stats_router, users_router

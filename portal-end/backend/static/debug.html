@@ -291,7 +291,7 @@
       <li><b>API docs:</b> <a href="/docs" target="_blank">/docs</a> (CRUD at <code>/api/reports|nodes|users|messages</code>, stats at <code>/api/stats</code>, debug at <code>/api/debug/*</code>).</li>
       <li><b>Data share:</b> Keep <code>portal.db</code> gitignored. Commit <code>seed_data.json</code> instead. Export via button or <code>python scripts/export_db.py</code>, import via button or <code>python scripts/seed_db.py</code> (<code>merge</code> upserts, <code>replace</code> wipes first).</li>
       <li><b>Schema changing a lot?</b> We use Alembic. After editing <code>models/*.py</code>: <code>alembic revision --autogenerate -m "describe"</code> then <code>alembic upgrade head</code>. Teammates do <code>git pull && alembic upgrade head && python scripts/seed_db.py</code> (or <code>scripts/setup.sh</code>).</li>
-      <li><b>Polling:</b> Nodes go <code>offline</code> after 15s without heartbeat (<code>packet_handler.py:24</code>). Debug page polls every 5s when auto is on.</li>
+      <li><b>Polling:</b> Nodes go <code>offline</code> after 15s without heartbeat (<code>packets/packet_handler.py</code>). Debug page polls every 5s when auto is on.</li>
     </ul>
     <div class="form" style="margin-top:12px">
       <h3>Quick cURL</h3>

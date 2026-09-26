@@ -13,8 +13,8 @@ from models.user import User
 from models.report import Report
 from models.node import Node, utcnow
 from models.message import Message
-from packet_handler import handle_uplink
-from serial_schema import Report as ReportPkt, UserReply as UserReplyPkt, Heartbeat as HeartbeatPkt, Neighbor, Role
+from packets.packet_handler import handle_uplink
+from packets.serial_schema import Report as ReportPkt, UserReply as UserReplyPkt, Heartbeat as HeartbeatPkt, Neighbor, Role
 
 router = APIRouter(prefix="/api/debug", tags=["debug"])
 
@@ -248,7 +248,7 @@ class FakeReport(BaseModel):
 
 @router.post("/fake/report")
 def fake_report(payload: FakeReport):
-    from serial_schema import Gps
+    from packets.serial_schema import Gps
     gps = None
     if payload.gps_lat is not None and payload.gps_lon is not None:
         gps = Gps(lat=payload.gps_lat, lon=payload.gps_lon, accuracy_m=payload.gps_accuracy or 10)

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from serial_schema import Neighbor
+from packets.serial_schema import Neighbor
 
 
 class NodeOut(BaseModel):

@@ -17,8 +17,8 @@ from models.message import Message as MessageRow
 from models.node import Node, utcnow
 from models.report import Report as ReportRow
 from models.user import User
-from packet_codec import encode_downlink, frame_packet
-from serial_schema import Ack, Heartbeat, Report, UserReply
+from packets.packet_codec import encode_downlink, frame_packet
+from packets.serial_schema import Ack, Heartbeat, Report, UserReply
 
 # -- configuration --
 HEARTBEAT_TIMEOUT_S = 15

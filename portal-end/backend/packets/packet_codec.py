@@ -15,7 +15,7 @@ from __future__ import annotations
 import struct
 from typing import Union
 
-from serial_schema import (
+from packets.serial_schema import (
     LOCATION_MAX,
     MAX_HOPS,
     MAX_NEIGHBORS,

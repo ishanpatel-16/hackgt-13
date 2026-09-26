@@ -127,12 +127,12 @@ def dump_sql(out_path: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=None, help="output json path (default: backend/seed_data.json)")
+    ap.add_argument("--out", default=None, help="output json path (default: backend/data/seed_data.json)")
     ap.add_argument("--dump-sql", action="store_true", help="also dump seed.sql")
     args = ap.parse_args()
 
     data = export_json()
-    out = Path(args.out) if args.out else BACKEND_DIR / "seed_data.json"
+    out = Path(args.out) if args.out else BACKEND_DIR / "data" / "seed_data.json"
     out.write_text(json.dumps(data, indent=2))
     print(f"wrote {out} — users:{len(data['users'])} reports:{len(data['reports'])} nodes:{len(data['nodes'])} messages:{len(data['messages'])}")
 

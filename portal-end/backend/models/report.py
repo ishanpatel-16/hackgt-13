@@ -4,7 +4,7 @@ from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
-from serial_schema import LOCATION_MAX, REPORT_MSG_MAX
+from packets.serial_schema import LOCATION_MAX, REPORT_MSG_MAX
 
 
 def utcnow() -> datetime:

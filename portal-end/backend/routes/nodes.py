@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.node import Node, utcnow
 from schemas.node import NodeOut
-from serial_schema import GATEWAY_ID, MAX_HOPS
+from packets.serial_schema import GATEWAY_ID, MAX_HOPS
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
