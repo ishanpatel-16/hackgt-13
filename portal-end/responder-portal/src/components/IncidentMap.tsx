@@ -205,11 +205,11 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident, r
           style: feature => {
             const p = feature?.properties
             if (p?.highway) {
-              return { color: '#65727a', weight: p.highway === 'footway' || p.highway === 'path' ? 0.7 : 1.1, opacity: 0.34, fillOpacity: 0 }
+              return { color: '#a8b8c6', weight: p.highway === 'footway' || p.highway === 'path' ? 0.9 : 1.3, opacity: 0.6, fillOpacity: 0 }
             }
             return p?.leisure
-              ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: 0.55 }
-              : { color: '#58616c', weight: 0.4, fillColor: '#2c333c', fillOpacity: 0.7 }
+              ? { color: '#7aa98c', weight: 1, fillColor: '#294638', fillOpacity: 0.65 }
+              : { color: '#8c9baa', weight: 0.7, fillColor: '#394653', fillOpacity: 0.8 }
           },
         }).addTo(map)
       })
