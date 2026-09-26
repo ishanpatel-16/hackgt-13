@@ -19,6 +19,7 @@ interface Props {
   peekUserId: number | null
   onPeekUser: (userId: number | null) => void
   onOpenMessages: (userId: number) => void
+  agentMode?: boolean
 }
 
 export default function IncidentQueue({
@@ -33,6 +34,7 @@ export default function IncidentQueue({
   peekUserId,
   onPeekUser,
   onOpenMessages,
+  agentMode = false,
 }: Props) {
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
   const [sort, setSort] = useState<IncidentSort>('arrival')
@@ -44,8 +46,8 @@ export default function IncidentQueue({
   const now = useNow()
 
   const groups = useMemo(
-    () => sortGroups(groupByUser(filteredIncidents), sort),
-    [filteredIncidents, sort],
+    () => sortGroups(groupByUser(filteredIncidents), agentMode ? 'priority' : sort),
+    [agentMode, filteredIncidents, sort],
   )
 
   const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
@@ -130,7 +132,7 @@ export default function IncidentQueue({
           <h2 id="queue-heading">Incidents</h2>
           <div className="queue-heading-actions">
             <span className="small-label">{filteredIncidents.length} reports</span>
-            <div className="sort-menu" ref={sortMenuRef}>
+            {!agentMode && <div className="sort-menu" ref={sortMenuRef}>
               <button
                 type="button"
                 className={`sort-toggle ${sortOpen ? 'open' : ''}`}
@@ -170,10 +172,17 @@ export default function IncidentQueue({
                   </button>
                 </div>
               )}
-            </div>
+            </div>}
           </div>
         </div>
-        <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
+        {agentMode ? (
+          <div className="agent-queue-banner" role="status">
+            <span className="agent-banner-spark" aria-hidden>✦</span>
+            <span><strong>Agent triage active</strong> · highest-risk reports first</span>
+          </div>
+        ) : (
+          <ResponderFilter selected={selectedFilters} onChange={onFiltersChange} />
+        )}
         <div className="incident-feed">
           {groups.length === 0 ? (
             <p className="queue-empty">No reports match these filters.</p>

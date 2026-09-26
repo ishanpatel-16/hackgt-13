@@ -1,4 +1,4 @@
-export type Emergency = 'Medical' | 'Fire' | 'Trapped'
+export type Emergency = 'Medical' | 'Fire' | 'Trapped' | 'Other'
 export type IncidentStatus = 'NEW' | 'ACKNOWLEDGED' | 'RESPONDING' | 'RESOLVED'
 
 export type AiResponder =
@@ -30,6 +30,8 @@ export interface Incident {
   aiResponders: AiResponder[]
   /** Matches backend `ai_priority`. */
   priority: AiPriority
+  clusterId?: string
+  aiSummary?: string
   x: number
   y: number
 }

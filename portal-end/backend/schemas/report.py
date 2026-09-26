@@ -20,6 +20,7 @@ class ReportList(BaseModel):
     created_at: datetime
     acked_at: datetime | None = None
     ai_responders: list[str] | None = None
+    cluster_id: str | None = None
 
 
 class ReportDetail(ReportList):
