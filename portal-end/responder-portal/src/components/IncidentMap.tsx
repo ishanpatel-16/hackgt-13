@@ -1,38 +1,145 @@
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import L from 'leaflet'
+import type { FeatureCollection } from 'geojson'
+import 'leaflet/dist/leaflet.css'
 import { mockMapNodes } from '../data/mockMapNodes'
+import { mockDeviceCoordinates } from '../data/mockDeviceCoordinates'
+import { deviceName } from '../utils/networkLabels'
 import type { Incident } from '../types/incident'
+import type { NetworkNode } from '../types/network'
 
-export default function IncidentMap({ incidents, selectedId, selectedNodeId, onSelectNode }: { incidents: Incident[]; selectedId: string; selectedNodeId: string | null; onSelectNode: (id: string) => void }) {
+interface Props {
+  incidents: Incident[]
+  nodes: NetworkNode[]
+  selectedId: string | null
+  selectedNodeId: string | null
+  onSelectNode: (id: string) => void
+  onSelectIncident: (id: string) => void
+  children?: ReactNode
+}
+
+function coordinates(incident: Incident): L.LatLngTuple | null {
+  const values = incident.location.split(',').map(Number)
+  return values.length === 2 && values.every(Number.isFinite) && Math.abs(values[0]) <= 90 && Math.abs(values[1]) <= 180
+    ? [values[0], values[1]] : null
+}
+
+export default function IncidentMap({ incidents, nodes, selectedId, selectedNodeId, onSelectNode, onSelectIncident, children }: Props) {
+  const host = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<L.Map | null>(null)
+  const [popupHost] = useState(() => document.createElement('div'))
+  const [mapError, setMapError] = useState(false)
+  const extent = L.latLngBounds([33.75, -84.405], [33.79, -84.365])
+
+  useEffect(() => {
+    const map = L.map(host.current!, { center: [33.771, -84.387], zoom: 15, minZoom: 14, maxZoom: 19, maxBounds: [[33.75, -84.405], [33.79, -84.365]], maxBoundsViscosity: 1, zoomControl: false, preferCanvas: true })
+    mapRef.current = map
+    L.control.zoom({ position: 'bottomright' }).addTo(map)
+    map.attributionControl.setPrefix(false)
+    map.attributionControl.addAttribution('© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · Local extract')
+    const controller = new AbortController()
+    fetch(`${import.meta.env.BASE_URL}maps/atlanta.geojson`, { signal: controller.signal })
+      .then(response => { if (!response.ok) throw Error('Local map unavailable'); return response.json() })
+      .then((data: FeatureCollection) => {
+        if (controller.signal.aborted) return
+        L.geoJSON(data, {
+          interactive: false,
+          style: feature => {
+            const p = feature?.properties
+            return p?.building ? { color: '#364452', weight: .5, fillColor: '#2c3948', fillOpacity: .9 }
+              : p?.leisure ? { color: '#253e35', weight: 1, fillColor: '#213b30', fillOpacity: .8 }
+              : { color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#7a8692' : '#4c5b69', weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2, opacity: .85 }
+          },
+          onEachFeature: (feature, layer) => {
+            if (feature.properties?.name && feature.properties?.highway && ['primary', 'secondary', 'tertiary'].includes(feature.properties.highway)) {
+              const label = document.createElement('span')
+              label.textContent = feature.properties.name
+              layer.bindTooltip(label, { permanent: false, className: 'geo-label' })
+            }
+          },
+        }).addTo(map).bringToBack()
+        // Sparse permanent geographic labels from real named roads, not invented places.
+        const names = new Set<string>()
+        data.features.forEach(feature => {
+          const p = feature.properties
+          if (!p?.name || names.has(p.name) || !['primary', 'secondary'].includes(p.highway) || feature.geometry.type !== 'LineString') return
+          names.add(p.name)
+          const point = feature.geometry.coordinates[Math.floor(feature.geometry.coordinates.length / 2)]
+          const label = document.createElement('span'); label.textContent = p.name
+          L.marker([point[1], point[0]], { interactive: false, icon: L.divIcon({ className: 'street-name', html: label, iconSize: [140, 20] }) }).addTo(map)
+        })
+      }).catch(error => { if (error.name !== 'AbortError') setMapError(true) })
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(host.current!)
+    return () => { controller.abort(); observer.disconnect(); map.remove(); mapRef.current = null }
+  }, [])
+
+  useEffect(() => {
+    const map = mapRef.current!
+    const layers = L.layerGroup().addTo(map)
+    const status = (name: string) => nodes.find(node => deviceName(node.name) === deviceName(name))?.status
+    const marker = (point: L.LatLngTuple, label: string, symbol: string, classes: string, action: () => void) => {
+      const button = document.createElement('button')
+      button.type = 'button'; button.className = `geo-marker ${classes}`
+      button.textContent = symbol; button.setAttribute('aria-label', label); button.title = label
+      button.onclick = event => { event.stopPropagation(); action() }
+      return L.marker(point, { icon: L.divIcon({ className: 'geo-marker-host', html: button, iconSize: [36, 36], iconAnchor: [18, 18] }), keyboard: false }).addTo(layers)
+    }
+    const seen = new Set<string>()
+    mockMapNodes.forEach(node => {
+      const point = mockDeviceCoordinates[node.id]
+      node.connections.forEach(name => {
+        const other = mockMapNodes.find(item => item.name === name)
+        if (!other) return
+        const key = [node.id, other.id].sort().join('-')
+        if (seen.has(key)) return
+        seen.add(key)
+        const offline = status(node.name) === 'OFFLINE' || status(other.name) === 'OFFLINE'
+        L.polyline([point, mockDeviceCoordinates[other.id]], { color: offline ? '#77504f' : '#69857a', weight: 1, opacity: offline ? .25 : .4, dashArray: '4 7', interactive: false }).addTo(layers)
+      })
+      const state = status(node.name)
+      marker(point, `${deviceName(node.name)} — ${state ?? 'status unavailable'}`, node.role === 'Gateway' ? '⌂' : node.role === 'Relay' ? '↔' : 'A', `device ${state?.toLowerCase() ?? 'unknown'} ${selectedNodeId === node.id ? 'chosen' : ''}`, () => onSelectNode(node.id))
+    })
+    const selected = incidents.find(incident => incident.id === selectedId)
+    if (selected) {
+      const path = selected.path.map(name => mockMapNodes.find(node => node.name === name))
+      const origin = coordinates(selected)
+      if (origin && path.every(node => node !== undefined)) {
+        const points = [origin, ...path.map(node => mockDeviceCoordinates[node!.id])]
+        const interrupted = path.some(node => status(node!.name) === 'OFFLINE')
+        L.polyline(points, { color: interrupted ? '#d59b76' : '#9bbbc9', weight: 3, opacity: .9, dashArray: interrupted ? '4 8' : undefined, interactive: false }).addTo(layers)
+      }
+    }
+    incidents.forEach(incident => {
+      const point = coordinates(incident)
+      if (!point) return
+      marker(point, `${incident.type} SOS ${incident.id}, ${incident.people} people`, incident.type === 'Medical' ? '+' : incident.type === 'Fire' ? '♨' : incident.type === 'Trapped' ? '!' : '•', `sos ${incident.type.toLowerCase()} ${incident.status === 'NEW' ? 'new' : ''} ${selectedId === incident.id ? 'chosen' : ''}`, () => onSelectIncident(incident.id))
+    })
+    return () => { layers.remove() }
+  }, [incidents, nodes, selectedId, selectedNodeId, onSelectNode, onSelectIncident])
+
+  useEffect(() => {
+    const map = mapRef.current!
+    const incident = incidents.find(item => item.id === selectedId)
+    const point = incident ? coordinates(incident) : selectedNodeId ? mockDeviceCoordinates[selectedNodeId] : null
+    if (!point) return
+    map.panTo(point, { animate: false })
+    const popup = L.popup({ closeButton: false, autoClose: false, closeOnClick: false, closeOnEscapeKey: false, maxWidth: 340, minWidth: 260, maxHeight: 400, offset: [0, -20], autoPanPadding: [24, 24], className: 'net0-map-popup' }).setLatLng(point).setContent(popupHost).openOn(map)
+    return () => { popup.remove() }
+  }, [selectedId, selectedNodeId, popupHost, incidents])
+
+  const interrupted = incidents.find(item => item.id === selectedId)?.path.some(name => nodes.some(node => deviceName(node.name) === deviceName(name) && node.status === 'OFFLINE'))
   return (
-    <section className="panel map-panel" aria-labelledby="map-heading">
-      <div className="panel-heading"><div><h2 id="map-heading">Live Incident Map</h2></div></div>
-      <div className="map-surface">
-        <svg className="map-drawing" viewBox="0 0 800 460" role="group" aria-labelledby="map-title map-description">
-          <title id="map-title">Illustrative emergency response map — selected SOS {selectedId}</title>
-          <desc id="map-description">Mock Medical incident at Node 07, Fire at Node 12, and Trapped at Node 04. Dashed lines represent a sample mesh route, not real geography.</desc>
-          <rect width="800" height="460" fill="#19252a" />
-          <path d="M0 330C160 290 120 410 310 385S540 470 800 380V460H0Z" fill="#1a3442" />
-          <path d="M0 0h190v100H0ZM615 230h185v100H615ZM80 220h105v75H80Z" fill="#24392f" />
-          <g fill="#26333a" stroke="#304047" strokeWidth="1">
-            {[40, 235, 435, 635].flatMap((x) => [35, 135, 245].map((y) => <rect key={`${x}-${y}`} x={x} y={y} width="100" height="55" rx="4" />))}
-          </g>
-          <g fill="none" stroke="#35444b" strokeWidth="21"><path d="M0 115H800M0 220H800M200 0v460M410 0v460M610 0v460M0 340h610" /></g>
-          <g fill="none" stroke="#202e35" strokeWidth="17"><path d="M0 115H800M0 220H800M200 0v460M410 0v460M610 0v460M0 340h610" /></g>
-          <g className="map-street-label"><text x="65" y="119">NORTH AVENUE</text><text x="450" y="224">CENTRAL AVENUE</text><text x="235" y="344">SOUTH STREET</text><text x="60" y="55">NORTH PARK</text><text x="650" y="280">EAST COMMON</text></g>
-          <path d="M325 210 260 295 410 290 675 355M585 150 410 290M505 345 410 290" fill="none" stroke="#729f8e" strokeWidth="2" strokeDasharray="6 6" />
-          {mockMapNodes.filter(node => node.role !== 'Access node').map(node => (
-            <g key={node.id} className="map-node-button" role="button" tabIndex={0} aria-label={`View ${node.name} details`} aria-pressed={selectedNodeId === node.id} onClick={() => onSelectNode(node.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectNode(node.id) } }} transform={`translate(${node.x} ${node.y})`}>
-              <circle r="25" fill="transparent" />
-              {selectedNodeId === node.id && <circle r="25" fill="none" stroke="#e5edf3" strokeWidth="3" />}
-              <rect x="-12" y="-12" width="24" height="24" rx="5" fill="#202e35" stroke="#89c4a4" strokeWidth="2" /><circle r="4" fill="#89c4a4" /><text className="map-node-label" y="29" textAnchor="middle">{node.label}</text>
-            </g>
-          ))}
-          {incidents.map((incident) => <g key={incident.id} className={`map-node-button ${incident.type.toLowerCase()}`} role="button" tabIndex={0} aria-label={`View Access Point ${incident.node} details`} aria-pressed={selectedNodeId === incident.node} onClick={() => onSelectNode(incident.node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectNode(incident.node) } }} transform={`translate(${incident.x} ${incident.y})`}>{(selectedNodeId ? selectedNodeId === incident.node : incident.id === selectedId) && <circle r="32" fill="none" stroke="#e5edf3" strokeWidth="3" />}<circle r="23" fill="var(--incident-color)" opacity=".1" /><circle r={(selectedNodeId ? selectedNodeId === incident.node : incident.id === selectedId) ? 23 : 17} fill="var(--incident-color)" stroke="#10161d" strokeWidth="3" /><text fill="#10161d" textAnchor="middle" y="5" fontSize="12" fontWeight="700">{incident.id}</text><rect x="-37" y="31" width="74" height="24" rx="4" fill="#202e35" stroke="#3d505c" /><text className="map-node-label" textAnchor="middle" y="47">AP {incident.node}</text></g>)}
-        </svg>
-        <div className="map-caption"><span className="status-dot" /> Emergency communication devices</div>
-        <div className="map-north" aria-label="North is up">N ↑</div>
-      </div>
-      <div className="map-legend"><span><i className="legend-incident" /> SOS</span><span><i className="legend-node" /> Device</span><span><i className="legend-link" /> Message link</span><span><b aria-hidden="true">GW</b> Responder Station</span></div>
+    <section className="panel map-panel geographic-panel" aria-label="Live Incident Map">
+      <div className="geo-canvas" ref={host} />
+      <div className="geo-title"><h2>Live Incident Map</h2><span>Atlanta · Local map</span></div>
+      <button className="fit-network" onClick={() => mapRef.current?.fitBounds(L.latLngBounds([...Object.values(mockDeviceCoordinates), ...incidents.flatMap(incident => { const point = coordinates(incident); return point ? [point] : [] })]).pad(.15))}>Fit network</button>
+      {mapError && <p className="geo-warning">Local map could not load. Emergency markers remain available.</p>}
+      {interrupted && <p className="geo-warning">A device on this report’s path is offline. Delivery through another route is not confirmed.</p>}
+      <div className="geo-legend">SOS · A Access Point · ↔ Relay · ⌂ Responder Station<span>Offline area: {extent.getSouth()}–{extent.getNorth()}° N</span></div>
+      {createPortal(children, popupHost)}
     </section>
   )
 }
-

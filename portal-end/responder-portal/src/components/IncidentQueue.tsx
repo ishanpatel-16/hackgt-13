@@ -3,7 +3,7 @@ import EmergencyIcon from './EmergencyIcon'
 
 interface Props {
   incidents: Incident[]
-  selectedId: string
+  selectedId: string | null
   onSelect: (id: string) => void
 }
 

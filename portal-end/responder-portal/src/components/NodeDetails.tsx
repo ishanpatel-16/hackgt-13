@@ -18,7 +18,7 @@ export default function NodeDetails({ node, networkNodes, incidents, onSelectInc
   const activeCount = reports.filter(report => report.status !== 'RESOLVED').length
   return (
     <section className="panel details-panel" aria-labelledby="node-details-heading">
-      <div className="panel-heading"><h2 id="node-details-heading">Device Details</h2><button className="reports-button node-close" onClick={onClose}>Back to incident</button></div>
+      <div className="panel-heading"><h2 id="node-details-heading">Device Details</h2><button className="reports-button node-close" onClick={onClose}>Close details</button></div>
       <div className="details-body">
         <h3 className="node-detail-name">{deviceName(node.name)}</h3>
         <p className={status === 'ONLINE' ? 'node-health' : 'network-impact'}>{status === 'ONLINE' ? '● Operating normally' : status === 'OFFLINE' ? 'Device stopped responding. Some emergency messages may not currently reach the responder station.' : 'Device status unavailable'}</p>
