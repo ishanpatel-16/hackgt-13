@@ -6,11 +6,21 @@ import IncidentDetails from './components/IncidentDetails'
 import AgentBrief from './components/AgentBrief'
 import NetworkStatus from './components/NetworkStatus'
 import { mockIncidents, mockNetworkNodes, mockBrief } from './data/mockIncidents'
+import NodeDetails from './components/NodeDetails'
+import { mockMapNodes } from './data/mockMapNodes'
 import './App.css'
 
 function App() {
   const [incidents, setIncidents] = useState(mockIncidents)
   const [selectedId, setSelectedId] = useState(mockIncidents[0].id)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const selectedNode = mockMapNodes.find(node => node.id === selectedNodeId)
+
+  function selectIncident(id: string) {
+    setSelectedId(id)
+    setSelectedNodeId(null)
+  }
+
   const selectedIncident = incidents.find(incident => incident.id === selectedId)!
 
   function acknowledgeIncident(id: string) {
@@ -24,9 +34,9 @@ function App() {
       <Header nodes={mockNetworkNodes} />
       <main className="dashboard-content">
         <div className="workspace">
-          <IncidentQueue incidents={incidents} selectedId={selectedId} onSelect={setSelectedId} />
-          <IncidentMap incidents={incidents} selectedId={selectedId} />
-          <IncidentDetails key={selectedId} incident={selectedIncident} onAcknowledge={acknowledgeIncident} />
+          <IncidentQueue incidents={incidents} selectedId={selectedId} onSelect={selectIncident} />
+          <IncidentMap incidents={incidents} selectedId={selectedId} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
+          {selectedNode ? <NodeDetails networkNodes={mockNetworkNodes} node={selectedNode} incidents={incidents} onSelectIncident={selectIncident} onClose={() => setSelectedNodeId(null)} /> : <IncidentDetails key={selectedId} incident={selectedIncident} onAcknowledge={acknowledgeIncident} />}
         </div>
         <AgentBrief brief={mockBrief} />
         <NetworkStatus nodes={mockNetworkNodes} />

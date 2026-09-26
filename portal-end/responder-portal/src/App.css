@@ -155,3 +155,19 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
   .agent-content { grid-template-columns: 1fr; }
   .brief-summary { grid-column: auto; }
 }
+
+.map-node-button { cursor: pointer; }
+.map-node-button:focus-visible { outline: 3px solid #83bde8; outline-offset: 5px; }
+.map-node-button:hover .map-node-label { fill: white; }
+.node-close { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: .75rem; }
+.node-detail-name { font-size: 1.6rem; margin-bottom: 8px; }
+.node-reports { display: grid; gap: 12px; }
+
+.device-purpose { display: block; color: var(--muted); font-size: .73rem; margin-bottom: 3px; }
+.device-section-title { margin-top: 20px; }
+.technical-details { margin: 0 0 20px; color: var(--muted); font-size: .8rem; }
+.technical-details summary { cursor: pointer; padding: 8px 0; }
+.technical-details summary:focus-visible { outline: 2px solid #83bde8; outline-offset: 3px; }
+.technical-details p { margin-top: 8px; overflow-wrap: anywhere; }
+.network-impact { color: #f2a29c; font-size: .85rem; }
+.network-heading .network-impact { color: #f2a29c; max-width: 290px; margin-top: 8px; }
