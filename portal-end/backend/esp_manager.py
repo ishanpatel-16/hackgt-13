@@ -3,6 +3,9 @@ import logging
 
 from bleak import BleakClient, BleakScanner
 
+from packet_codec import decode_uplink, feed_frames
+from packet_handler import handle_uplink
+
 # -- configuration --
 # bluetooth gateway connection
 SERVICE_UUID = "7b2f3a91-8c64-4f2e-a7d1-91c8e7b5d421"
@@ -15,6 +18,13 @@ logger = logging.getLogger(__name__)
 # -- bluetooth status --
 ble_client: BleakClient | None = None
 ble_device = None
+
+# -- packet queues --
+_rx_buffer = bytearray()
+_uplink_queue: asyncio.Queue[bytes] | None = None
+_downlink_queue: asyncio.Queue[bytes] | None = None
+_loop: asyncio.AbstractEventLoop | None = None
+
 
 # -- bluetooth --
 async def find_esp32():
@@ -48,10 +58,92 @@ async def find_esp32():
     return None
 
 
+def _on_notify(sender, data: bytearray):
+
+    if _uplink_queue is None or _loop is None:
+        return
+
+    _loop.call_soon_threadsafe(
+        _uplink_queue.put_nowait,
+        bytes(data),
+    )
+
+
+def _queue_downlink(framed: bytes) -> None:
+
+    if _downlink_queue is None or _loop is None:
+        return
+
+    _loop.call_soon_threadsafe(
+        _downlink_queue.put_nowait,
+        framed,
+    )
+
+
+async def _process_uplink(chunk: bytes):
+
+    global _rx_buffer
+
+    try:
+
+        payloads = feed_frames(
+            _rx_buffer,
+            chunk
+        )
+
+        for payload in payloads:
+
+            pkt = decode_uplink(payload)
+
+            logger.info(
+                f"Uplink {pkt.type} ({len(payload)} bytes)"
+            )
+
+            await asyncio.to_thread(
+                handle_uplink,
+                pkt,
+                _queue_downlink,
+            )
+
+    except Exception as e:
+
+        logger.error(
+            f"Failed to parse BLE payload: {e}"
+        )
+
+
+async def _flush_downlink(client: BleakClient):
+
+    if _downlink_queue is None:
+        return
+
+    while not _downlink_queue.empty():
+
+        framed = _downlink_queue.get_nowait()
+
+        await client.write_gatt_char(
+            CHARACTERISTIC_UUID,
+            framed,
+            response=False,
+        )
+
+        logger.info(
+            f"Sent downlink ({len(framed)} bytes)"
+        )
+
+
 async def connect_to_esp32():
 
     global ble_client
     global ble_device
+    global _rx_buffer
+    global _uplink_queue
+    global _downlink_queue
+    global _loop
+
+    _loop = asyncio.get_running_loop()
+    _uplink_queue = asyncio.Queue()
+    _downlink_queue = asyncio.Queue()
 
     while True:
 
@@ -83,19 +175,44 @@ async def connect_to_esp32():
 
                 ble_client = client
                 ble_device = device
+                _rx_buffer.clear()
+
+                await client.start_notify(
+                    CHARACTERISTIC_UUID,
+                    _on_notify,
+                )
 
                 logger.info(
                     f"Connected to {device.name}"
                 )
 
-                # stay connected
+                # stay connected + handle packets
                 while client.is_connected:
 
-                    await asyncio.sleep(1)
+                    try:
+
+                        chunk = await asyncio.wait_for(
+                            _uplink_queue.get(),
+                            timeout=0.1,
+                        )
+
+                        await _process_uplink(chunk)
+
+                    except asyncio.TimeoutError:
+                        pass
+
+                    await _flush_downlink(client)
 
                 logger.warning(
                     "Gateway ESP32 disconnected."
                 )
+
+                try:
+                    await client.stop_notify(
+                        CHARACTERISTIC_UUID
+                    )
+                except Exception:
+                    pass
 
                 ble_client = None
                 ble_device = None

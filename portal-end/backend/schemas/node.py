@@ -10,6 +10,7 @@ class NodeOut(BaseModel):
 
     node_id: int
     role: int
+    status: str
     clients: int
     path: list[int] | None = None
     uptime_s: int

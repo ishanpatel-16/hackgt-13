@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Integer
+from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -15,6 +15,7 @@ class Node(Base):
 
     node_id: Mapped[int] = mapped_column(primary_key=True)
     role: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="offline", index=True)
     clients: Mapped[int] = mapped_column(Integer, default=0)
     path: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
