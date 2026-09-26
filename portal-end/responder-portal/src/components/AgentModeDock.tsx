@@ -83,6 +83,7 @@ export default function AgentModeDock({
   onApproveCheckIn,
 }: AgentModeDockProps) {
   const [expanded, setExpanded] = useState(false)
+  const [fullPlanExpanded, setFullPlanExpanded] = useState(false)
   const [approved, setApproved] = useState(false)
   const [deliveryStatus, setDeliveryStatus] = useState<'sent' | 'pending' | null>(null)
   const [sending, setSending] = useState(false)
@@ -125,6 +126,7 @@ export default function AgentModeDock({
   }
 
   function toggleDock() {
+    setFullPlanExpanded(false)
     setExpanded(current => !current)
   }
 
@@ -172,12 +174,6 @@ export default function AgentModeDock({
                 <span>{priorityLabel(plan.priority)}</span>
                 <span className="agent-confidence">{plan.confidence} confidence</span>
               </div>
-              {brief && (
-                <div className="agent-live-brief">
-                  <span className="agent-section-label">Live synthesis · {brief.incidentCount} incident clusters</span>
-                  <strong>{brief.insight}</strong>
-                </div>
-              )}
               <h3>{plan.title}</h3>
               <p className="agent-plan-summary">{plan.summary}</p>
 
@@ -192,69 +188,89 @@ export default function AgentModeDock({
                   <strong>{plan.avoid}</strong>
                 </div>
 
-                <div className="agent-best-path">
-                  <div className="agent-best-path-heading">
-                    <div>
-                      <span className="agent-section-label">Best path · visible on map</span>
-                      <strong>{plan.routeLabel}</strong>
-                    </div>
-                    <span className="agent-path-status"><i /> {plan.route.length ? (responderLive ? 'Live position' : 'Demo movement') : 'Waiting for GPS'}</span>
-                  </div>
-                  <div className="agent-path-steps">
-                    {plan.route.length
-                      ? plan.route.map((point, index) => (
-                          <span key={`${point.label}-${point.lat}`}>
-                            <b>{index + 1}</b>{point.label}{index < plan.route.length - 1 && <em>→</em>}
-                          </span>
-                        ))
-                      : <span>Enable location access or select a GPS-backed report.</span>}
-                  </div>
-                  <p>{plan.routeNote}</p>
-                </div>
               </div>
 
-              <div className="agent-section">
-                <span className="agent-section-label">Evidence trail</span>
-                <div className="agent-evidence-list">
-                  {plan.evidence.map(item => (
-                    <div className="agent-evidence" key={item.label}>
-                      <StatusDot tone={item.tone} />
+              <button
+                type="button"
+                className="agent-full-plan-toggle"
+                aria-expanded={fullPlanExpanded}
+                aria-controls="agent-full-plan"
+                onClick={() => setFullPlanExpanded(current => !current)}
+              >
+                {fullPlanExpanded ? 'Hide full plan ↑' : 'View full plan ↓'}
+              </button>
+              <div id="agent-full-plan" hidden={!fullPlanExpanded}>
+                {brief && (
+                  <div className="agent-live-brief">
+                    <span className="agent-section-label">Live synthesis · {brief.incidentCount} incident clusters</span>
+                    <strong>{brief.insight}</strong>
+                  </div>
+                )}
+                <div className="agent-route-grid">
+                  <div className="agent-best-path">
+                    <div className="agent-best-path-heading">
                       <div>
-                        <strong>{item.label}</strong>
-                        <span>{item.detail}</span>
+                        <span className="agent-section-label">Best path · visible on map</span>
+                        <strong>{plan.routeLabel}</strong>
                       </div>
+                      <span className="agent-path-status"><i /> {plan.route.length ? (responderLive ? 'Live position' : 'Demo movement') : 'Waiting for GPS'}</span>
                     </div>
-                  ))}
+                    <div className="agent-path-steps">
+                      {plan.route.length
+                        ? plan.route.map((point, index) => (
+                            <span key={`${point.label}-${point.lat}`}>
+                              <b>{index + 1}</b>{point.label}{index < plan.route.length - 1 && <em>→</em>}
+                            </span>
+                          ))
+                        : <span>Enable location access or select a GPS-backed report.</span>}
+                    </div>
+                    <p>{plan.routeNote}</p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="agent-section agent-unknowns">
-                <span className="agent-section-label">Still unconfirmed</span>
-                <ul>
-                  {plan.unknowns.map(item => <li key={item}>{item}</li>)}
-                </ul>
-              </div>
-
-              <div className="agent-draft">
-                <div>
-                  <span className="agent-section-label">Draft civilian check-in</span>
-                  <p>{plan.draft}</p>
+                <div className="agent-section">
+                  <span className="agent-section-label">Evidence trail</span>
+                  <div className="agent-evidence-list">
+                    {plan.evidence.map(item => (
+                      <div className="agent-evidence" key={item.label}>
+                        <StatusDot tone={item.tone} />
+                        <div>
+                          <strong>{item.label}</strong>
+                          <span>{item.detail}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <button type="button" className={`agent-approve ${approved ? 'approved' : ''}`} onClick={approveCheckIn} disabled={approved || sending}>
-                  {sending ? 'Sending…' : approved ? (deliveryStatus === 'sent' ? 'Sent' : 'Queued for mesh') : 'Approve & send'}
-                </button>
-              </div>
-              {sendError && <p className="agent-send-error" role="alert">{sendError}</p>}
-              {approved && !sendError && (
-                <p className="agent-send-status" role="status">
-                  {deliveryStatus === 'sent' ? 'Check-in handed to the mesh gateway.' : 'Check-in saved for delivery when the mesh gateway is available.'}
-                </p>
-              )}
 
-              <div className="agent-tool-trace" aria-label="Agent activity">
-                <span>{loading ? '◌ Refreshing agent' : '✓ Clustered reports'}</span>
-                <span>✓ Checked mesh</span>
-                <span>{runStatus === 'fallback' ? '◇ Deterministic fallback' : '✓ Drafted check-in'}</span>
+                <div className="agent-section agent-unknowns">
+                  <span className="agent-section-label">Still unconfirmed</span>
+                  <ul>
+                    {plan.unknowns.map(item => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+
+                <div className="agent-draft">
+                  <div>
+                    <span className="agent-section-label">Draft civilian check-in</span>
+                    <p>{plan.draft}</p>
+                  </div>
+                  <button type="button" className={`agent-approve ${approved ? 'approved' : ''}`} onClick={approveCheckIn} disabled={approved || sending}>
+                    {sending ? 'Sending…' : approved ? (deliveryStatus === 'sent' ? 'Sent' : 'Queued for mesh') : 'Approve & send'}
+                  </button>
+                </div>
+                {sendError && <p className="agent-send-error" role="alert">{sendError}</p>}
+                {approved && !sendError && (
+                  <p className="agent-send-status" role="status">
+                    {deliveryStatus === 'sent' ? 'Check-in handed to the mesh gateway.' : 'Check-in saved for delivery when the mesh gateway is available.'}
+                  </p>
+                )}
+
+                <div className="agent-tool-trace" aria-label="Agent activity">
+                  <span>{loading ? '◌ Refreshing agent' : '✓ Clustered reports'}</span>
+                  <span>✓ Checked mesh</span>
+                  <span>{runStatus === 'fallback' ? '◇ Deterministic fallback' : '✓ Drafted check-in'}</span>
+                </div>
               </div>
             </div>
           ) : (
@@ -267,14 +283,14 @@ export default function AgentModeDock({
         </div>
       )}
 
-      <button type="button" className={`agent-dock-toggle ${active ? 'active' : ''}`} onClick={toggleDock} aria-expanded={expanded}>
+      {!expanded && <button type="button" className={`agent-dock-toggle ${active ? 'active' : ''}`} onClick={toggleDock} aria-expanded={expanded}>
         <span className="agent-orbit" aria-hidden><span /></span>
         <span className="agent-dock-label">
           <strong>Agent Mode</strong>
           <small>{active ? 'ON · ready to assist' : 'OFF · manual control'}</small>
         </span>
         <span className="agent-caret" aria-hidden>{expanded ? '⌄' : '⌃'}</span>
-      </button>
+      </button>}
     </aside>
   )
 }

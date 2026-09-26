@@ -5,6 +5,7 @@ import type { Incident } from '../types/incident'
 import EmergencyIcon from './EmergencyIcon'
 import { useRelativeTime } from '../hooks/useRelativeTime'
 import PriorityMeter from './PriorityMeter'
+import DispatchPanel from './DispatchPanel'
 
 export default function IncidentDetails({
   incident,
@@ -14,6 +15,7 @@ export default function IncidentDetails({
   onAcknowledge: (id: string) => void
 }) {
   const [showReports, setShowReports] = useState(false)
+  const [showDispatch, setShowDispatch] = useState(false)
   const reported = useRelativeTime(incident.arrivedAt)
   const isNew = incident.status === 'NEW'
 
@@ -62,7 +64,7 @@ export default function IncidentDetails({
         <h4>Report</h4>
         <blockquote>“{incident.report}”</blockquote>
         <p className="detail-route">Reported {reported}</p>
-        <div className="detail-actions">
+        <div className="detail-actions incident-detail-actions">
           {isNew && (
             <button className="acknowledge-button" onClick={() => onAcknowledge(incident.id)}>
               Acknowledge
@@ -75,6 +77,9 @@ export default function IncidentDetails({
             onClick={() => setShowReports(!showReports)}
           >
             {showReports ? 'Hide Reports' : 'View Reports'}
+          </button>
+          <button type="button" className="reports-button" aria-haspopup="dialog" aria-expanded={showDispatch} onClick={() => setShowDispatch(true)}>
+            Dispatch
           </button>
         </div>
         <dl className="detail-facts">
@@ -100,6 +105,7 @@ export default function IncidentDetails({
           </div>
         )}
       </div>
+      {showDispatch && <DispatchPanel incident={incident} onClose={() => setShowDispatch(false)} />}
     </section>
   )
 }
