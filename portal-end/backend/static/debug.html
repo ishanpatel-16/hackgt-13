@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>net0 — SQL Debug Lab</title>
+<style>
+  :root{--bg:#0f1115;--panel:#191c23;--muted:#9aa3b2;--line:#242a36;--accent:#6ee7b7;--accent2:#60a5fa;--danger:#f87171;--radius:14px;--mono: ui-monospace, SFMono-Regular, Menlo, monospace;--sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:#e6e8ee;font-family:var(--sans);line-height:1.5}
+  a{color:var(--accent2)}
+  header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .wrap{max-width:1280px;margin:0 auto;padding:0 20px}
+  .head{display:flex;align-items:center;justify-content:space-between;padding:14px 0;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;gap:12px;align-items:center}
+  .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-weight:800;color:#0b1220}
+  .brand h1{font-size:16px;margin:0;letter-spacing:.08em;text-transform:uppercase}
+  .brand p{margin:0;color:var(--muted);font-size:12px}
+  .pill{font-family:var(--mono);font-size:11px;border:1px solid var(--line);padding:6px 10px;border-radius:999px;background:var(--panel);color:var(--muted)}
+  .pill.ok{border-color:rgba(110,231,183,.4);color:var(--accent)}
+  .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:16px 0 8px}
+  @media(max-width:900px){.stats{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:520px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+  .card b{font-size:20px;display:block}
+  .card span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:10px 0 14px;align-items:center}
+  .toolbar .spacer{flex:1}
+  button, .btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:#e6e8ee;padding:8px 12px;border-radius:10px;font-size:13px;cursor:pointer}
+  button.primary{background:var(--accent);color:#0b1220;border-color:transparent;font-weight:700}
+  button.danger{background:var(--danger);color:white;border-color:transparent}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input,select,textarea{width:100%;background:#0f1115;border:1px solid var(--line);color:#e6e8ee;padding:8px 10px;border-radius:10px;font-size:13px;font-family:var(--sans)}
+  textarea{resize:vertical}
+  .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding:0 0 0;margin-top:6px;overflow:auto}
+  .tab{padding:10px 14px;border-radius:10px 10px 0 0;cursor:pointer;border:1px solid transparent;color:var(--muted);white-space:nowrap}
+  .tab.active{background:var(--panel);border-color:var(--line);border-bottom-color:var(--panel);color:#fff;margin-bottom:-1px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-top:none;border-radius:0 0 var(--radius) var(--radius);padding:16px}
+  .grid2{display:grid;grid-template-columns:1fr 340px;gap:16px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 6px;border-bottom:1px solid rgba(36,42,54,.6);vertical-align:top;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+  td.mono{font-family:var(--mono);font-size:12px}
+  tr:hover td{background:rgba(96,165,250,.03)}
+  .actions{display:flex;gap:6px}
+  .actions button{padding:6px 8px;font-size:12px}
+  .form{background:#0f1115;border:1px solid var(--line);border-radius:12px;padding:12px}
+  .form h3{margin:0 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .form-grid.full{grid-template-columns:1fr}
+  .help{font-size:11px;color:var(--muted)}
+  .toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);padding:10px 12px;border-radius:12px;max-width:420px;display:none;z-index:50}
+  .toast.show{display:block}
+  .badge{font-family:var(--mono);font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid var(--line)}
+  .badge.online{border-color:rgba(110,231,183,.5);color:var(--accent)}
+  .badge.offline{color:var(--muted)}
+  .muted{color:var(--muted)}
+  details{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#0f1115}
+  summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .row{display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap head">
+    <div class="brand">
+      <div class="logo">n0</div>
+      <div>
+        <h1>net0 — SQL Debug Lab</h1>
+        <p>Test your SQLite tables without BLE hardware. Create / edit / delete + share <code>seed_data.json</code>.</p>
+      </div>
+    </div>
+    <div class="row">
+      <span id="health" class="pill">checking…</span>
+      <a class="pill" href="/docs" target="_blank">/docs</a>
+      <a class="pill" href="/api/debug/export" target="_blank">export JSON</a>
+    </div>
+  </div>
+</header>
+<main class="wrap">
+  <section id="stats" class="stats"></section>
+  <div class="toolbar">
+    <button onclick="loadAll()">↻ Refresh</button>
+    <button onclick="doExport()">⤓ Export seed_data.json</button>
+    <label class="btn">⤒ Import <input id="importFile" type="file" accept=".json" hidden onchange="doImport(event)"></label>
+    <select id="importMode" style="width:auto">
+      <option value="merge">merge (upsert)</option>
+      <option value="replace">replace (wipe first)</option>
+    </select>
+    <button class="danger" onclick="doReset()">⚠ Reset all</button>
+    <span class="spacer"></span>
+    <input id="seedCount" type="number" value="5" min="1" max="50" style="width:70px">
+    <button class="primary" onclick="seedRandom()">Seed random</button>
+    <label class="pill" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="autoPoll" checked onchange="togglePoll()"> auto 5s</label>
+  </div>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-tab="reports">Reports</div>
+    <div class="tab" data-tab="nodes">Nodes</div>
+    <div class="tab" data-tab="users">Users</div>
+    <div class="tab" data-tab="messages">Messages</div>
+    <div class="tab" data-tab="fake">Fake Inject</div>
+    <div class="tab" data-tab="help">Help</div>
+  </div>
+  <div class="panel" id="panel-reports">
+    <div class="grid2">
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">Reports <span id="count-reports" class="muted"></span></h3>
+          <input id="filter-reports" placeholder="filter by location, status, user_id…" style="max-width:260px" oninput="renderReports()">
+        </div>
+        <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
+          <table id="tbl-reports"><thead><tr><th>id</th><th>msg_id</th><th>user</th><th>origin→path</th><th>cat/sev</th><th>people/needs</th><th>location</th><th>status</th><th>created</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="form" id="form-reports">
+        <h3 id="report-form-title">Create report</h3>
+        <div class="form-grid">
+          <label>msg_id <input id="r-msg_id" type="number" placeholder="auto random if empty"></label>
+          <label>user_id <input id="r-user_id" type="number" value="1"></label>
+          <label>origin <input id="r-origin" type="number" value="1"></label>
+          <label>path (csv) <input id="r-path" value="1,9"></label>
+          <label>category <select id="r-category"><option value="0">0 unknown</option><option value="1" selected>1 medical</option><option value="2">2 trapped</option><option value="3">3 fire</option><option value="4">4 flood</option><option value="5">5 structural</option><option value="6">6 security</option><option value="7">7 hazmat</option><option value="8">8 other</option></select></label>
+          <label>severity <select id="r-severity"><option value="0">0 unknown</option><option value="1" selected>1 low</option><option value="2">2 moderate</option><option value="3">3 high</option><option value="4">4 life</option></select></label>
+          <label>people <input id="r-people" type="number" value="1"></label>
+          <label>needs (bits) <input id="r-needs" type="number" value="0"></label>
+          <label style="grid-column:1/-1">location <input id="r-location" value="Test Location"></label>
+          <label style="grid-column:1/-1">message <textarea id="r-message" rows="2">Help needed — debug test</textarea></label>
+          <label>gps lat <input id="r-lat" placeholder="33.77"></label>
+          <label>gps lon <input id="r-lon" placeholder="-84.39"></label>
+          <label>gps acc <input id="r-acc" placeholder="10"></label>
+          <label>status <select id="r-status"><option selected>received</option><option>pending</option><option>acked</option><option>closed</option></select></label>
+          <label>name (auto user) <input id="r-name" value="Test User"></label>
+          <label>phone <input id="r-phone" value="4040000001"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="createReport()">Create</button>
+          <button onclick="resetReportForm()">Clear</button>
+          <span class="help">msg_id must be unique. Uses POST /api/reports (also creates user if missing).</span>
+        </div>
+        <div id="report-edit-bar" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+          <div class="help">Editing id <span id="edit-report-id"></span></div>
+          <div class="row" style="margin-top:6px">
+            <button onclick="saveReportEdit()">Save PATCH</button>
+            <button onclick="cancelReportEdit()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panel-nodes" style="display:none">
+    <div class="grid2">
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">Nodes <span id="count-nodes" class="muted"></span></h3>
+          <input id="filter-nodes" placeholder="filter node_id, status…" style="max-width:260px" oninput="renderNodes()">
+        </div>
+        <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
+          <table id="tbl-nodes"><thead><tr><th>node_id</th><th>role</th><th>status</th><th>clients</th><th>path</th><th>uptime</th><th>tx/rx</th><th>battery</th><th>neighbors</th><th>last_seen</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="form">
+        <h3 id="node-form-title">Create node</h3>
+        <div class="form-grid">
+          <label>node_id <input id="n-id" type="number" placeholder="e.g. 2"></label>
+          <label>role <select id="n-role"><option value="1" selected>1 relay</option><option value="2">2 access</option><option value="3">3 gateway</option></select></label>
+          <label>status <select id="n-status"><option selected>online</option><option>offline</option></select></label>
+          <label>clients <input id="n-clients" type="number" value="0"></label>
+          <label>path (csv) <input id="n-path" value="2,9"></label>
+          <label>battery <input id="n-battery" type="number" placeholder="0-100 or empty"></label>
+          <label>uptime_s <input id="n-uptime" type="number" value="0"></label>
+          <label>tx <input id="n-tx" type="number" value="0"></label>
+          <label>rx <input id="n-rx" type="number" value="0"></label>
+          <label style="grid-column:1/-1">neighbors JSON <textarea id="n-neighbors" rows="2">[{"id":9,"rssi":-60}]</textarea></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="createNode()">Create</button>
+          <button onclick="resetNodeForm()">Clear</button>
+        </div>
+        <div id="node-edit-bar" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+          <span class="help">Editing <span id="edit-node-id"></span></span>
+          <div class="row" style="margin-top:6px"><button onclick="saveNodeEdit()">Save PATCH</button><button onclick="cancelNodeEdit()">Cancel</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panel-users" style="display:none">
+    <div class="grid2">
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">Users <span id="count-users" class="muted"></span></h3>
+          <input id="filter-users" placeholder="filter name, phone…" style="max-width:260px" oninput="renderUsers()">
+        </div>
+        <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
+          <table id="tbl-users"><thead><tr><th>user_id</th><th>name</th><th>phone</th><th>first_seen</th><th>last_seen</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="form">
+        <h3 id="user-form-title">Create / edit user</h3>
+        <div class="form-grid full">
+          <label>user_id <input id="u-id" type="number" value="1"></label>
+          <label>name <input id="u-name" value="Alex"></label>
+          <label>phone <input id="u-phone" value="4040000001"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="createUser()">Create</button>
+          <button onclick="resetUserForm()">Clear</button>
+        </div>
+        <div id="user-edit-bar" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+          <span class="help">Editing <span id="edit-user-id"></span></span>
+          <div class="row" style="margin-top:6px"><button onclick="saveUserEdit()">Save PATCH</button><button onclick="cancelUserEdit()">Cancel</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panel-messages" style="display:none">
+    <div class="grid2">
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">Messages <span id="count-messages" class="muted"></span></h3>
+          <input id="filter-messages" placeholder="filter sender, text…" style="max-width:260px" oninput="renderMessages()">
+        </div>
+        <div style="overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px">
+          <table id="tbl-messages"><thead><tr><th>id</th><th>msg_id</th><th>dir</th><th>user</th><th>reply_to</th><th>target</th><th>sender</th><th>text</th><th>status</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="form">
+        <h3 id="msg-form-title">Create message</h3>
+        <div class="form-grid">
+          <label>msg_id (opt) <input id="m-msgid" placeholder="leave empty"></label>
+          <label>direction <select id="m-dir"><option selected>downlink</option><option>uplink</option><option>pending</option></select></label>
+          <label>user_id <input id="m-user" type="number" value="1"></label>
+          <label>reply_to <input id="m-reply" type="number" value="0"></label>
+          <label>target_node <input id="m-target" type="number" value="1"></label>
+          <label>sender <input id="m-sender" value="Responder"></label>
+          <label style="grid-column:1/-1">path (csv) <input id="m-path" value="1,9"></label>
+          <label style="grid-column:1/-1">text <textarea id="m-text" rows="2">Hello from portal — debug</textarea></label>
+          <label>status <select id="m-status"><option selected>pending</option><option>received</option><option>sent</option></select></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="createMessage()">Create</button>
+          <button onclick="resetMsgForm()">Clear</button>
+        </div>
+        <div id="msg-edit-bar" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+          <span class="help">Editing <span id="edit-msg-id"></span></span>
+          <div class="row" style="margin-top:6px"><button onclick="saveMsgEdit()">Save PATCH</button><button onclick="cancelMsgEdit()">Cancel</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panel-fake" style="display:none">
+    <h3>Fake hardware inject (goes through <code>handle_uplink</code> like real BLE)</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form">
+        <h3>Heartbeat</h3>
+        <div class="form-grid full">
+          <label>node <input id="f-h-node" type="number" value="1"></label>
+          <label>role <select id="f-h-role"><option value="1" selected>relay</option><option value="2">access</option><option value="3">gateway</option></select></label>
+          <label>path <input id="f-h-path" value="1,9"></label>
+          <label>neighbors JSON <input id="f-h-neigh" value='[{"id":9,"rssi":-65}]'></label>
+        </div>
+        <button class="primary" style="margin-top:8px" onclick="fakeHeartbeat()">Send heartbeat</button>
+      </div>
+      <div class="form">
+        <h3>Report (SOS)</h3>
+        <div class="form-grid full">
+          <label>msg_id <input id="f-r-msg" type="number" placeholder="random if empty"></label>
+          <label>user_id <input id="f-r-user" type="number" value="42"></label>
+          <label>location <input id="f-r-loc" value="Bldg A"></label>
+        </div>
+        <button class="primary" style="margin-top:8px" onclick="fakeReport()">Send report</button>
+      </div>
+      <div class="form">
+        <h3>User reply</h3>
+        <div class="form-grid full">
+          <label>msg_id <input id="f-u-msg" type="number" placeholder="random"></label>
+          <label>user_id <input id="f-u-user" type="number" value="42"></label>
+          <label>reply_to (msg_id) <input id="f-u-reply" type="number" value="0"></label>
+          <label>text <input id="f-u-text" value="We need water"></label>
+        </div>
+        <button class="primary" style="margin-top:8px" onclick="fakeUserReply()">Send reply</button>
+      </div>
+    </div>
+    <details style="margin-top:12px"><summary>How sharing works (seed_data.json)</summary>
+      <p class="help">1) Hit <b>Export</b> to download your local <code>seed_data.json</code> (all 4 tables). 2) Commit that file to git. 3) Teammate pulls and hits <b>Import (merge)</b> or runs <code>python scripts/seed_db.py</code>. Schema changes: run <code>alembic upgrade head</code> first — see Help tab.</p>
+    </details>
+  </div>
+  <div class="panel" id="panel-help" style="display:none">
+    <h3>How to use</h3>
+    <ul class="help" style="line-height:1.7">
+      <li><b>Backend:</b> <code>fastapi dev</code> inside <code>portal-end/backend</code>. Tables auto-create on start (<code>main.py:40</code>).</li>
+      <li><b>API docs:</b> <a href="/docs" target="_blank">/docs</a> (CRUD at <code>/api/reports|nodes|users|messages</code>, stats at <code>/api/stats</code>, debug at <code>/api/debug/*</code>).</li>
+      <li><b>Data share:</b> Keep <code>portal.db</code> gitignored. Commit <code>seed_data.json</code> instead. Export via button or <code>python scripts/export_db.py</code>, import via button or <code>python scripts/seed_db.py</code> (<code>merge</code> upserts, <code>replace</code> wipes first).</li>
+      <li><b>Schema changing a lot?</b> We use Alembic. After editing <code>models/*.py</code>: <code>alembic revision --autogenerate -m "describe"</code> then <code>alembic upgrade head</code>. Teammates do <code>git pull && alembic upgrade head && python scripts/seed_db.py</code> (or <code>scripts/setup.sh</code>).</li>
+      <li><b>Polling:</b> Nodes go <code>offline</code> after 15s without heartbeat (<code>packet_handler.py:24</code>). Debug page polls every 5s when auto is on.</li>
+    </ul>
+    <div class="form" style="margin-top:12px">
+      <h3>Quick cURL</h3>
+      <pre class="mono" style="white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)">curl http://localhost:8000/api/stats
+curl http://localhost:8000/api/reports | jq
+curl -X POST http://localhost:8000/api/debug/seed_random?count=5
+curl http://localhost:8000/api/debug/export | jq > seed_data.json</pre>
+    </div>
+  </div>
+  <p class="help" style="text-align:center;padding:16px">net0 debug lab — same-origin, no auth. Disable with <code>DEBUG=0</code> env.</p>
+</main>
+<div id="toast" class="toast"></div>
+<script>
+const $ = s=>document.querySelector(s);
+let state = {reports:[], nodes:[], users:[], messages:[], stats:null};
+let editReportId=null, editNodeId=null, editUserId=null, editMsgId=null;
+let pollTimer=null;
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelectorAll('[id^="panel-"]').forEach(p=>p.style.display='none');
+  $('#panel-'+t.dataset.tab).style.display='block';
+}));
+function toast(msg, ok=true){
+  const el=$('#toast'); el.textContent=msg; el.style.borderColor= ok?'rgba(110,231,183,.5)':'rgba(248,113,113,.6)'; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 2500);
+}
+async function api(path, opts={}){
+  const r=await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts});
+  if(!r.ok){ const t=await r.text(); throw new Error(t||r.statusText); }
+  if(r.status===204) return null;
+  return r.json();
+}
+async function loadStats(){
+  try{
+    const s=await api('/api/stats');
+    state.stats=s;
+    $('#health').textContent='online'; $('#health').className='pill ok';
+    $('#stats').innerHTML = `
+      <div class="card"><span>users</span><b>${s.users}</b></div>
+      <div class="card"><span>reports</span><b>${s.reports}</b></div>
+      <div class="card"><span>nodes total</span><b>${s.nodes_total}</b></div>
+      <div class="card"><span>online</span><b style="color:var(--accent)">${s.nodes_online}</b></div>
+      <div class="card"><span>offline</span><b>${s.nodes_offline}</b></div>
+      <div class="card"><span>messages</span><b>${s.messages}</b></div>
+    `;
+  }catch(e){ $('#health').textContent='offline'; $('#health').className='pill'; }
+}
+async function loadReports(){ try{ state.reports=await api('/api/reports?limit=200'); renderReports(); }catch(e){} }
+async function loadNodes(){ try{ state.nodes=await api('/api/nodes'); renderNodes(); }catch(e){} }
+async function loadUsers(){ try{ state.users=await api('/api/users'); renderUsers(); }catch(e){} }
+async function loadMessages(){ try{ state.messages=await api('/api/messages?limit=200'); renderMessages(); }catch(e){} }
+async function loadAll(){ await Promise.all([loadStats(), loadReports(), loadNodes(), loadUsers(), loadMessages()]); }
+function esc(s){ if(s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function fmtTime(s){ if(!s) return '<span class="muted">—</span>'; try{ return new Date(s).toLocaleString(); }catch{ return esc(s); } }
+function renderReports(){
+  const q=($('#filter-reports').value||'').toLowerCase();
+  let rows=state.reports;
+  if(q) rows=rows.filter(r=> JSON.stringify(r).toLowerCase().includes(q));
+  $('#count-reports').textContent=`(${rows.length})`;
+  const tbody=$('#tbl-reports tbody'); tbody.innerHTML='';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="mono">${r.id}</td>
+      <td class="mono">${r.msg_id}</td>
+      <td class="mono">${r.user_id}</td>
+      <td class="mono">${r.origin} → ${esc(JSON.stringify(r.path))}</td>
+      <td>${r.category}/${r.severity}</td>
+      <td>${r.people}/${r.needs}</td>
+      <td>${esc(r.location||'')}<div class="muted" style="font-size:11px">${esc((r.message||'').slice(0,48))}</div></td>
+      <td><span class="badge">${esc(r.status)}</span></td>
+      <td class="mono" style="font-size:11px">${fmtTime(r.created_at)}</td>
+      <td><div class="actions"><button onclick="startEditReport(${r.id})">Edit</button><button onclick="delReport(${r.id})">Del</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderNodes(){
+  const q=($('#filter-nodes').value||'').toLowerCase();
+  let rows=state.nodes;
+  if(q) rows=rows.filter(r=> JSON.stringify(r).toLowerCase().includes(q));
+  $('#count-nodes').textContent=`(${rows.length})`;
+  const tbody=$('#tbl-nodes tbody'); tbody.innerHTML='';
+  rows.forEach(n=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="mono">${n.node_id}</td>
+      <td>${n.role}</td>
+      <td><span class="badge ${n.status}">${esc(n.status)}</span></td>
+      <td>${n.clients}</td>
+      <td class="mono">${esc(JSON.stringify(n.path))}</td>
+      <td>${n.uptime_s}</td>
+      <td>${n.tx}/${n.rx}</td>
+      <td>${n.battery??'—'}</td>
+      <td class="mono" style="font-size:11px">${esc(JSON.stringify(n.neighbors||[])).slice(0,48)}</td>
+      <td class="mono" style="font-size:11px">${fmtTime(n.last_seen)}</td>
+      <td><div class="actions"><button onclick="startEditNode(${n.node_id})">Edit</button><button onclick="delNode(${n.node_id})">Del</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderUsers(){
+  const q=($('#filter-users').value||'').toLowerCase();
+  let rows=state.users;
+  if(q) rows=rows.filter(r=> JSON.stringify(r).toLowerCase().includes(q));
+  $('#count-users').textContent=`(${rows.length})`;
+  const tbody=$('#tbl-users tbody'); tbody.innerHTML='';
+  rows.forEach(u=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="mono">${u.user_id}</td>
+      <td>${esc(u.name)}</td>
+      <td class="mono">${esc(u.phone)}</td>
+      <td class="mono" style="font-size:11px">${fmtTime(u.first_seen)}</td>
+      <td class="mono" style="font-size:11px">${fmtTime(u.last_seen)}</td>
+      <td><div class="actions"><button onclick="startEditUser(${u.user_id})">Edit</button><button onclick="delUser(${u.user_id})">Del</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderMessages(){
+  const q=($('#filter-messages').value||'').toLowerCase();
+  let rows=state.messages;
+  if(q) rows=rows.filter(r=> JSON.stringify(r).toLowerCase().includes(q));
+  $('#count-messages').textContent=`(${rows.length})`;
+  const tbody=$('#tbl-messages tbody'); tbody.innerHTML='';
+  rows.forEach(m=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="mono">${m.id}</td>
+      <td class="mono">${m.msg_id??'—'}</td>
+      <td><span class="badge">${esc(m.direction)}</span></td>
+      <td class="mono">${m.user_id??'—'}</td>
+      <td class="mono">${m.reply_to}</td>
+      <td class="mono">${m.target_node??'—'}</td>
+      <td>${esc(m.sender)}</td>
+      <td>${esc((m.text||'').slice(0,48))}</td>
+      <td><span class="badge">${esc(m.status)}</span></td>
+      <td><div class="actions"><button onclick="startEditMsg(${m.id})">Edit</button><button onclick="delMsg(${m.id})">Del</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+async function createUser(){
+  try{
+    await api('/api/users', {method:'POST', body:JSON.stringify({user_id: parseInt($('#u-id').value), name: $('#u-name').value, phone: $('#u-phone').value})});
+    toast('user created'); loadUsers(); loadStats();
+  }catch(e){ toast(e.message, false); }
+}
+async function createNode(){
+  try{
+    const body={node_id: parseInt($('#n-id').value), role: parseInt($('#n-role').value), status: $('#n-status').value, clients: parseInt($('#n-clients').value||0), path: $('#n-path').value? $('#n-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean): null, uptime_s: parseInt($('#n-uptime').value||0), tx: parseInt($('#n-tx').value||0), rx: parseInt($('#n-rx').value||0), battery: $('#n-battery').value? parseInt($('#n-battery').value): null, neighbors: JSON.parse($('#n-neighbors').value||'[]')};
+    if(!body.node_id) throw new Error('node_id required');
+    await api('/api/nodes', {method:'POST', body:JSON.stringify(body)});
+    toast('node created'); loadNodes(); loadStats();
+  }catch(e){ toast(e.message, false); }
+}
+async function createReport(){
+  try{
+    const body={
+      msg_id: $('#r-msg_id').value? parseInt($('#r-msg_id').value): Math.floor(Math.random()*900000+100000),
+      user_id: parseInt($('#r-user_id').value), origin: parseInt($('#r-origin').value),
+      path: $('#r-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean),
+      category: parseInt($('#r-category').value), severity: parseInt($('#r-severity').value),
+      people: parseInt($('#r-people').value||0), needs: parseInt($('#r-needs').value||0),
+      location: $('#r-location').value, message: $('#r-message').value,
+      gps_lat: $('#r-lat').value? parseFloat($('#r-lat').value): null,
+      gps_lon: $('#r-lon').value? parseFloat($('#r-lon').value): null,
+      gps_accuracy: $('#r-acc').value? parseInt($('#r-acc').value): null,
+      status: $('#r-status').value, name: $('#r-name').value, phone: $('#r-phone').value,
+    };
+    await api('/api/reports', {method:'POST', body:JSON.stringify(body)});
+    toast('report created'); loadReports(); loadUsers(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+async function createMessage(){
+  try{
+    const body={
+      msg_id: $('#m-msgid').value? parseInt($('#m-msgid').value): null,
+      direction: $('#m-dir').value, user_id: $('#m-user').value? parseInt($('#m-user').value): null,
+      reply_to: parseInt($('#m-reply').value||0), target_node: $('#m-target').value? parseInt($('#m-target').value): null,
+      path: $('#m-path').value? $('#m-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean): null,
+      sender: $('#m-sender').value, text: $('#m-text').value, status: $('#m-status').value
+    };
+    await api('/api/messages', {method:'POST', body:JSON.stringify(body)});
+    toast('message created'); loadMessages(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+function startEditReport(id){
+  const r=state.reports.find(x=>x.id===id); if(!r) return;
+  editReportId=id; $('#report-form-title').textContent='Edit report #'+id; $('#edit-report-id').textContent=id; $('#report-edit-bar').style.display='block';
+  $('#r-msg_id').value=r.msg_id; $('#r-user_id').value=r.user_id; $('#r-origin').value=r.origin; $('#r-path').value=(r.path||[]).join(','); $('#r-category').value=r.category; $('#r-severity').value=r.severity; $('#r-people').value=r.people; $('#r-needs').value=r.needs; $('#r-location').value=r.location; $('#r-message').value=r.message; $('#r-status').value=r.status;
+  window.scrollTo({top:0, behavior:'smooth'});
+  document.querySelector('.tab[data-tab="reports"]').click();
+}
+async function saveReportEdit(){
+  try{
+    const body={category: parseInt($('#r-category').value), severity: parseInt($('#r-severity').value), people: parseInt($('#r-people').value), needs: parseInt($('#r-needs').value), location: $('#r-location').value, message: $('#r-message').value, status: $('#r-status').value, path: $('#r-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean), origin: parseInt($('#r-origin').value)};
+    await api('/api/reports/'+editReportId, {method:'PATCH', body:JSON.stringify(body)});
+    toast('report updated'); cancelReportEdit(); loadReports();
+  }catch(e){ toast(e.message,false);}
+}
+function cancelReportEdit(){ editReportId=null; $('#report-form-title').textContent='Create report'; $('#report-edit-bar').style.display='none'; }
+function resetReportForm(){ cancelReportEdit(); $('#r-msg_id').value=''; }
+function startEditNode(id){
+  const n=state.nodes.find(x=>x.node_id===id); if(!n) return;
+  editNodeId=id; $('#node-form-title').textContent='Edit node '+id; $('#edit-node-id').textContent=id; $('#node-edit-bar').style.display='block';
+  $('#n-id').value=n.node_id; $('#n-role').value=n.role; $('#n-status').value=n.status; $('#n-clients').value=n.clients; $('#n-path').value=(n.path||[]).join(','); $('#n-battery').value=n.battery??''; $('#n-uptime').value=n.uptime_s; $('#n-tx').value=n.tx; $('#n-rx').value=n.rx; $('#n-neighbors').value=JSON.stringify(n.neighbors||[]);
+  document.querySelector('.tab[data-tab="nodes"]').click();
+}
+async function saveNodeEdit(){
+  try{
+    const body={role: parseInt($('#n-role').value), status: $('#n-status').value, clients: parseInt($('#n-clients').value), path: $('#n-path').value? $('#n-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean): null, battery: $('#n-battery').value? parseInt($('#n-battery').value): null, uptime_s: parseInt($('#n-uptime').value), tx: parseInt($('#n-tx').value), rx: parseInt($('#n-rx').value), neighbors: JSON.parse($('#n-neighbors').value||'[]')};
+    await api('/api/nodes/'+editNodeId, {method:'PATCH', body:JSON.stringify(body)});
+    toast('node updated'); cancelNodeEdit(); loadNodes();
+  }catch(e){ toast(e.message,false);}
+}
+function cancelNodeEdit(){ editNodeId=null; $('#node-form-title').textContent='Create node'; $('#node-edit-bar').style.display='none'; }
+function resetNodeForm(){ cancelNodeEdit(); $('#n-id').value=''; }
+function startEditUser(id){
+  const u=state.users.find(x=>x.user_id===id); if(!u) return;
+  editUserId=id; $('#user-form-title').textContent='Edit user '+id; $('#edit-user-id').textContent=id; $('#user-edit-bar').style.display='block';
+  $('#u-id').value=u.user_id; $('#u-name').value=u.name; $('#u-phone').value=u.phone;
+  document.querySelector('.tab[data-tab="users"]').click();
+}
+async function saveUserEdit(){
+  try{
+    await api('/api/users/'+editUserId, {method:'PATCH', body:JSON.stringify({name: $('#u-name').value, phone: $('#u-phone').value})});
+    toast('user updated'); cancelUserEdit(); loadUsers();
+  }catch(e){ toast(e.message,false);}
+}
+function cancelUserEdit(){ editUserId=null; $('#user-form-title').textContent='Create / edit user'; $('#user-edit-bar').style.display='none'; }
+function resetUserForm(){ cancelUserEdit(); }
+function startEditMsg(id){
+  const m=state.messages.find(x=>x.id===id); if(!m) return;
+  editMsgId=id; $('#msg-form-title').textContent='Edit message '+id; $('#edit-msg-id').textContent=id; $('#msg-edit-bar').style.display='block';
+  $('#m-msgid').value=m.msg_id??''; $('#m-dir').value=m.direction; $('#m-user').value=m.user_id??''; $('#m-reply').value=m.reply_to; $('#m-target').value=m.target_node??''; $('#m-sender').value=m.sender; $('#m-text').value=m.text; $('#m-status').value=m.status; $('#m-path').value=(m.path||[]).join(',');
+  document.querySelector('.tab[data-tab="messages"]').click();
+}
+async function saveMsgEdit(){
+  try{
+    const body={direction: $('#m-dir').value, user_id: $('#m-user').value? parseInt($('#m-user').value): null, reply_to: parseInt($('#m-reply').value), target_node: $('#m-target').value? parseInt($('#m-target').value): null, sender: $('#m-sender').value, text: $('#m-text').value, status: $('#m-status').value, path: $('#m-path').value? $('#m-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean): null};
+    await api('/api/messages/'+editMsgId, {method:'PATCH', body:JSON.stringify(body)});
+    toast('message updated'); cancelMsgEdit(); loadMessages();
+  }catch(e){ toast(e.message,false);}
+}
+function cancelMsgEdit(){ editMsgId=null; $('#msg-form-title').textContent='Create message'; $('#msg-edit-bar').style.display='none'; }
+function resetMsgForm(){ cancelMsgEdit(); }
+async function delReport(id){ if(!confirm('Delete report '+id+'?')) return; try{ await api('/api/reports/'+id,{method:'DELETE'}); toast('deleted'); loadReports(); loadStats(); }catch(e){toast(e.message,false)} }
+async function delNode(id){ if(!confirm('Delete node '+id+'?')) return; try{ await api('/api/nodes/'+id,{method:'DELETE'}); toast('deleted'); loadNodes(); loadStats(); }catch(e){toast(e.message,false)} }
+async function delUser(id){ if(!confirm('Delete user '+id+'? This will also delete reports/messages via FK.')) return; try{ await api('/api/users/'+id,{method:'DELETE'}); toast('deleted'); loadUsers(); loadReports(); loadMessages(); loadStats(); }catch(e){toast(e.message,false)} }
+async function delMsg(id){ if(!confirm('Delete message '+id+'?')) return; try{ await api('/api/messages/'+id,{method:'DELETE'}); toast('deleted'); loadMessages(); loadStats(); }catch(e){toast(e.message,false)} }
+async function doExport(){
+  try{
+    const data=await api('/api/debug/export');
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='seed_data.json'; a.click(); URL.revokeObjectURL(url);
+    toast('exported seed_data.json');
+  }catch(e){ toast(e.message,false); }
+}
+async function doImport(ev){
+  const file=ev.target.files[0]; if(!file) return;
+  try{
+    const text=await file.text(); const json=JSON.parse(text);
+    json.mode=$('#importMode').value;
+    await api('/api/debug/import',{method:'POST', body:JSON.stringify(json)});
+    toast('imported '+file.name+' ('+json.mode+')'); loadAll();
+  }catch(e){ toast('import failed: '+e.message,false); }
+  ev.target.value='';
+}
+async function doReset(){ if(!confirm('Reset ALL tables? This deletes every row.')) return; try{ await api('/api/debug/reset',{method:'POST'}); toast('reset done'); loadAll(); }catch(e){toast(e.message,false)} }
+async function seedRandom(){ try{ const c=parseInt($('#seedCount').value||5); await api('/api/debug/seed_random?count='+c,{method:'POST'}); toast('seeded '+c); loadAll(); }catch(e){toast(e.message,false)} }
+async function fakeHeartbeat(){
+  try{
+    const body={node: parseInt($('#f-h-node').value), role: parseInt($('#f-h-role').value), path: $('#f-h-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean), neighbors: JSON.parse($('#f-h-neigh').value||'[]')};
+    await api('/api/debug/fake/heartbeat',{method:'POST', body:JSON.stringify(body)});
+    toast('heartbeat sent'); loadNodes(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+async function fakeReport(){
+  try{
+    const body={msg_id: $('#f-r-msg').value? parseInt($('#f-r-msg').value): Math.floor(Math.random()*900000+100000), user_id: parseInt($('#f-r-user').value), location: $('#f-r-loc').value, origin:1, path:[1,9], category:1, severity:1, message:'Fake SOS'};
+    await api('/api/debug/fake/report',{method:'POST', body:JSON.stringify(body)});
+    toast('report injected'); loadReports(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+async function fakeUserReply(){
+  try{
+    const body={msg_id: $('#f-u-msg').value? parseInt($('#f-u-msg').value): Math.floor(Math.random()*900000+100000), user_id: parseInt($('#f-u-user').value), reply_to: parseInt($('#f-u-reply').value), text: $('#f-u-text').value};
+    await api('/api/debug/fake/user_reply',{method:'POST', body:JSON.stringify(body)});
+    toast('reply injected'); loadMessages(); loadStats();
+  }catch(e){ toast(e.message,false); }
+}
+function togglePoll(){ if($('#autoPoll').checked) startPoll(); else stopPoll(); }
+function startPoll(){ stopPoll(); pollTimer=setInterval(loadAll, 5000); }
+function stopPoll(){ if(pollTimer) clearInterval(pollTimer); pollTimer=null; }
+loadAll(); startPoll();
+</script>
+</body>
+</html>
