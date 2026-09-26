@@ -20,7 +20,6 @@ class ReportCreate(BaseModel):
     origin: int = Field(ge=1, le=254)
     path: list[int] = Field(default_factory=lambda: [1])
     category: int = 0
-    severity: int = 0
     people: int = 0
     needs: int = 0
     gps_lat: Optional[float] = None
@@ -32,6 +31,7 @@ class ReportCreate(BaseModel):
     ai_priority: Optional[int] = None
     ai_category: Optional[int] = None
     ai_summary: Optional[str] = None
+    ai_responders: Optional[list[str]] = None
 
     # optional auto-create user fields
     name: str = ""
@@ -40,7 +40,6 @@ class ReportCreate(BaseModel):
 
 class ReportUpdate(BaseModel):
     category: Optional[int] = None
-    severity: Optional[int] = None
     people: Optional[int] = None
     needs: Optional[int] = None
     gps_lat: Optional[float] = None
@@ -52,6 +51,7 @@ class ReportUpdate(BaseModel):
     ai_priority: Optional[int] = None
     ai_category: Optional[int] = None
     ai_summary: Optional[str] = None
+    ai_responders: Optional[list[str]] = None
     path: Optional[list[int]] = None
     origin: Optional[int] = None
 
@@ -108,7 +108,6 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db)):
         origin=payload.origin,
         path=payload.path,
         category=payload.category,
-        severity=payload.severity,
         people=payload.people,
         needs=payload.needs,
         gps_lat=payload.gps_lat,
@@ -120,6 +119,7 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db)):
         ai_priority=payload.ai_priority,
         ai_category=payload.ai_category,
         ai_summary=payload.ai_summary,
+        ai_responders=payload.ai_responders,
         created_at=now,
         acked_at=now,
     )

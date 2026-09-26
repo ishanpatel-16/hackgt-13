@@ -26,7 +26,6 @@ class Report(Base):
     path: Mapped[list] = mapped_column(JSON)
 
     category: Mapped[int] = mapped_column(Integer)
-    severity: Mapped[int] = mapped_column(Integer)
     people: Mapped[int] = mapped_column(Integer, default=0)
     needs: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -44,5 +43,6 @@ class Report(Base):
     ai_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_category: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    ai_responders: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="reports")

@@ -4,6 +4,10 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -15,7 +19,15 @@ from packets import esp_manager
 from packets.packet_handler import mark_stale_nodes_offline
 
 # routers
-from routes import debug_router, messages_router, nodes_router, reports_router, stats_router, users_router
+from routes import (
+    ai_router,
+    debug_router,
+    messages_router,
+    nodes_router,
+    reports_router,
+    stats_router,
+    users_router,
+)
 
 # -- configuration --
 # logging
@@ -112,6 +124,7 @@ app.include_router(nodes_router)
 app.include_router(reports_router)
 app.include_router(messages_router)
 app.include_router(stats_router)
+app.include_router(ai_router)
 
 # debug routes guarded by env (default on for hackathon)
 DEBUG = os.getenv("DEBUG", "1") != "0"

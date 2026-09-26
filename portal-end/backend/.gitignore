@@ -1,2 +1,5 @@
 __pycache__/
 portal.db
+.env
+.env.*
+!.env.example

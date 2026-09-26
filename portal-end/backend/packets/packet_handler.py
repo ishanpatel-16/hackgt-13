@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
+from ai.process import enqueue_process_report
 from database import SessionLocal
 from models.message import Message as MessageRow
 from models.node import Node, utcnow
@@ -34,6 +35,7 @@ def handle_uplink(
 ) -> None:
 
     db = SessionLocal()
+    new_report_msg_id: int | None = None
 
     try:
 
@@ -41,7 +43,8 @@ def handle_uplink(
             _handle_heartbeat(db, pkt)
 
         elif isinstance(pkt, Report):
-            _handle_report(db, pkt, send_downlink)
+            if _handle_report(db, pkt, send_downlink):
+                new_report_msg_id = pkt.msg_id
 
         elif isinstance(pkt, UserReply):
             _handle_user_reply(db, pkt, send_downlink)
@@ -63,6 +66,9 @@ def handle_uplink(
 
     finally:
         db.close()
+
+    if new_report_msg_id is not None:
+        enqueue_process_report(new_report_msg_id)
 
 
 def mark_stale_nodes_offline() -> int:
@@ -164,7 +170,8 @@ def _handle_report(
     db: Session,
     pkt: Report,
     send_downlink,
-) -> None:
+) -> bool:
+    """Persist a new report. Returns True if a new row was inserted."""
 
     _upsert_user(
         db,
@@ -192,7 +199,7 @@ def _handle_report(
             acked_msg_id=pkt.msg_id,
         )
 
-        return
+        return False
 
     gps_lat = None
     gps_lon = None
@@ -210,7 +217,6 @@ def _handle_report(
         origin=pkt.origin,
         path=list(pkt.path),
         category=int(pkt.category),
-        severity=int(pkt.severity),
         people=pkt.people,
         needs=pkt.needs,
         gps_lat=gps_lat,
@@ -234,6 +240,8 @@ def _handle_report(
         user_id=pkt.user_id,
         acked_msg_id=pkt.msg_id,
     )
+
+    return True
 
 
 def _handle_user_reply(

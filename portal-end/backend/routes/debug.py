@@ -35,11 +35,12 @@ def export_db(db: Session = Depends(get_db)):
     def ser_report(r: Report):
         return {
             "id": r.id, "msg_id": r.msg_id, "attempt": r.attempt, "user_id": r.user_id, "origin": r.origin, "path": r.path,
-            "category": r.category, "severity": r.severity, "people": r.people, "needs": r.needs,
+            "category": r.category, "people": r.people, "needs": r.needs,
             "gps_lat": r.gps_lat, "gps_lon": r.gps_lon, "gps_accuracy": r.gps_accuracy,
             "location": r.location, "message": r.message, "created_at": r.created_at.isoformat() if r.created_at else None,
             "acked_at": r.acked_at.isoformat() if r.acked_at else None, "status": r.status,
             "ai_priority": r.ai_priority, "ai_category": r.ai_category, "ai_summary": r.ai_summary,
+            "ai_responders": r.ai_responders,
         }
 
     def ser_node(n: Node):
@@ -149,11 +150,12 @@ def import_db(payload: ImportPayload, db: Session = Depends(get_db)):
         report = Report(
             id=r.get("id") if payload.mode=="replace" else None, # let autoincrement if merge
             msg_id=msg_id, attempt=r.get("attempt",0), user_id=uid, origin=r.get("origin",1), path=r.get("path",[1]),
-            category=r.get("category",0), severity=r.get("severity",0), people=r.get("people",0), needs=r.get("needs",0),
+            category=r.get("category",0), people=r.get("people",0), needs=r.get("needs",0),
             gps_lat=r.get("gps_lat"), gps_lon=r.get("gps_lon"), gps_accuracy=r.get("gps_accuracy"),
             location=r.get("location",""), message=r.get("message",""),
             created_at=parse_dt2(r.get("created_at")) or utcnow(), acked_at=parse_dt2(r.get("acked_at")),
             status=r.get("status","received"), ai_priority=r.get("ai_priority"), ai_category=r.get("ai_category"), ai_summary=r.get("ai_summary"),
+            ai_responders=r.get("ai_responders"),
         )
         # if merge and existing, skip already handled; if replace, insert
         if payload.mode == "replace" and existing:
@@ -235,7 +237,6 @@ class FakeReport(BaseModel):
     path: list[int] = Field(default_factory=lambda: [1])
     user_id: int = 1
     category: int = 1
-    severity: int = 1
     people: int = 1
     needs: int = 0
     name: str = "Test User"
@@ -248,10 +249,11 @@ class FakeReport(BaseModel):
 
 @router.post("/fake/report")
 def fake_report(payload: FakeReport):
-    from packets.serial_schema import Gps
+    from packets.serial_schema import Gps, Severity
     gps = None
     if payload.gps_lat is not None and payload.gps_lon is not None:
         gps = Gps(lat=payload.gps_lat, lon=payload.gps_lon, accuracy_m=payload.gps_accuracy or 10)
+    # Wire schema still requires severity; ignored on persist (AI sets ai_priority).
     pkt = ReportPkt(
         type="report",
         msg_id=payload.msg_id,
@@ -260,7 +262,7 @@ def fake_report(payload: FakeReport):
         path=payload.path,
         user_id=payload.user_id,
         category=payload.category,
-        severity=payload.severity,
+        severity=Severity.UNKNOWN,
         people=payload.people,
         needs=payload.needs,
         gps=gps,
@@ -324,7 +326,7 @@ def seed_random(count: int = 5, db: Session = Depends(get_db)):
         if db.query(Report).filter(Report.msg_id==msg_id).first():
             continue
         uid = random.choice(user_ids)
-        db.add(Report(msg_id=msg_id, attempt=0, user_id=uid, origin=random.randint(1,5), path=[random.randint(1,5),9], category=random.randint(1,8), severity=random.randint(1,4), people=random.randint(1,5), needs=random.randint(0,255), location=f"Area {random.randint(1,99)}", message=f"Emergency {msg_id}", status="received", created_at=now, acked_at=now))
+        db.add(Report(msg_id=msg_id, attempt=0, user_id=uid, origin=random.randint(1,5), path=[random.randint(1,5),9], category=random.randint(1,8), people=random.randint(1,5), needs=random.randint(0,255), location=f"Area {random.randint(1,99)}", message=f"Emergency {msg_id}", status="received", created_at=now, acked_at=now))
         created["reports"]+=1
     # messages
     for i in range(count):

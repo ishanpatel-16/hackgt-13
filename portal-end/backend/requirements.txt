@@ -1,0 +1,9 @@
+fastapi[standard]
+uvicorn
+sqlalchemy
+psycopg2-binary
+python-dotenv
+alembic
+bleak
+google-genai
+fpdf2

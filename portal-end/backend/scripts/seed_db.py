@@ -128,7 +128,6 @@ def seed(data, mode="merge"):
                 origin=r.get("origin", 1),
                 path=r.get("path", [1]),
                 category=r.get("category", 0),
-                severity=r.get("severity", 0),
                 people=r.get("people", 0),
                 needs=r.get("needs", 0),
                 gps_lat=r.get("gps_lat"),
@@ -142,6 +141,7 @@ def seed(data, mode="merge"):
                 ai_priority=r.get("ai_priority"),
                 ai_category=r.get("ai_category"),
                 ai_summary=r.get("ai_summary"),
+                ai_responders=r.get("ai_responders"),
             )
             # handle explicit id if replace and provided
             if r.get("id") and mode == "replace":

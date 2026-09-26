@@ -12,7 +12,6 @@ class ReportList(BaseModel):
     msg_id: int
     user_id: int
     category: int
-    severity: int
     people: int
     needs: int
     location: str
@@ -20,6 +19,7 @@ class ReportList(BaseModel):
     ai_priority: int | None = None
     created_at: datetime
     acked_at: datetime | None = None
+    ai_responders: list[str] | None = None
 
 
 class ReportDetail(ReportList):

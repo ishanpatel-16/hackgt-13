@@ -56,7 +56,6 @@ def export_json():
                 "origin": r.origin,
                 "path": r.path,
                 "category": r.category,
-                "severity": r.severity,
                 "people": r.people,
                 "needs": r.needs,
                 "gps_lat": r.gps_lat,
@@ -70,6 +69,7 @@ def export_json():
                 "ai_priority": r.ai_priority,
                 "ai_category": r.ai_category,
                 "ai_summary": r.ai_summary,
+                "ai_responders": r.ai_responders,
             }
 
         def ser_node(n):
