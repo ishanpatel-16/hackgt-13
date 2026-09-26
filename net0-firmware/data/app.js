@@ -2,6 +2,8 @@
 // 1. Pick an emergency type + number of people, add location/details.
 // 2. SEND posts to the node (/send); the node floods it and retries until the
 //    gateway ACKs. We poll /status and flip the confirmation to "Delivered".
+// 3. Chat: responders' messages reach the node; we poll /messages. Our replies
+//    go to /reply (a user_reply packet, also retried until ACKed).
 const $ = (id) => document.getElementById(id);
 
 // Backend Category numbers (portal-end/backend/packets/serial_schema.py).
@@ -106,6 +108,7 @@ function startGps() {
 }
 
 syncUserId().then((info) => {
+  pollChat();
   if (inSignInPopup && info.https) {
     showOpenBrowserHelp();
   } else if (window.isSecureContext) {
@@ -209,10 +212,17 @@ function showConfirmation(msgId, sentWithGps) {
   $("confirmation-issue-row").hidden = !text;
   $("confirmation-issue").textContent = text;
 
-  $("report-id").textContent = msgId;
+  setReportId(msgId);
   setDeliveryStatus("Transmitting through the local emergency network...", false);
-  $("request-screen").classList.remove("active");
-  $("confirmation-screen").classList.add("active");
+  showScreen("confirmation");
+}
+
+function showScreen(name) {
+  const confirming = name === "confirmation";
+  $("request-screen").classList.toggle("active", !confirming);
+  $("confirmation-screen").classList.toggle("active", confirming);
+  $("new-report-block").hidden = !confirming;
+  updateChatVisibility();
   window.scrollTo(0, 0);
 }
 
@@ -262,14 +272,127 @@ async function sendSos() {
 
 $("send-sos").addEventListener("click", sendSos);
 
-// "Send an update": back to the form, keeping type/people/location so the user
-// only has to add what changed. (Sent as a new report for now; a proper
-// follow-up message will use the reserved user_reply packet type.)
+// "Send a new report": back to the form, keeping type/people/location so the
+// user only has to add what changed. Small updates go through the chat instead.
 $("send-update").addEventListener("click", () => {
   pollingFor = null;
   details.value = "";
   $("details-count").textContent = "0";
-  $("confirmation-screen").classList.remove("active");
-  $("request-screen").classList.add("active");
-  window.scrollTo(0, 0);
+  showScreen("request");
 });
+
+// ---------- messages with responders ----------
+// Responders write from the portal; the gateway floods it through the mesh and
+// our node keeps it (last 16 lines per node). We poll /messages for everything
+// for our user ID and redraw. Replies are about our latest report (reply_to).
+let reportId = loadReportId();  // hex msg_id of our latest SOS, "" if none
+let chatLines = [];
+const shownSeqs = new Set();
+let firstChatLoad = true;
+
+function loadReportId() {
+  try { return localStorage.getItem("net0_report_id") || ""; } catch (e) { return ""; }
+}
+
+function setReportId(id) {
+  reportId = id;
+  $("report-id").textContent = id;
+  try { localStorage.setItem("net0_report_id", id); } catch (e) {}
+}
+if (reportId) $("report-id").textContent = reportId;
+
+function updateChatVisibility() {
+  // Always on the confirmation screen; on the form only once there's something to read.
+  $("chat").hidden = !($("confirmation-screen").classList.contains("active") || chatLines.length);
+}
+
+function renderChat() {
+  const log = $("chat-log");
+  log.querySelectorAll(".bubble").forEach((b) => b.remove());
+  $("chat-empty").hidden = chatLines.length > 0;
+  let gotNew = false;
+  for (const m of chatLines) {
+    const mine = m.from === "you";
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${mine ? "you" : "responder"}`;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = mine ? "You" : (m.sender || "Responders");
+    bubble.append(who, document.createTextNode(m.text));
+    if (mine) {
+      const state = document.createElement("span");
+      state.className = m.delivered ? "state ok" : "state";
+      state.textContent = m.delivered ? "✓ Delivered to responders" : "Sending through the network...";
+      bubble.appendChild(state);
+    } else if (!shownSeqs.has(m.seq) && !firstChatLoad) {
+      bubble.classList.add("new");
+      gotNew = true;
+    }
+    shownSeqs.add(m.seq);
+    log.appendChild(bubble);
+  }
+  firstChatLoad = false;
+  updateChatVisibility();
+  if (gotNew) {
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    $("chat").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+let chatBusy = false;
+async function pollChat() {
+  if (!userId || chatBusy) return;
+  chatBusy = true;
+  try {
+    // after=0: fetch the whole (small) log so "Delivered" ticks update too.
+    const res = await fetch(`/messages?id=${userId}&after=0`);
+    const data = await res.json();
+    chatLines = data.messages || [];
+    renderChat();
+  } catch (e) {
+    // lost Wi-Fi for a moment; try again next time
+  } finally {
+    chatBusy = false;
+  }
+}
+setInterval(pollChat, 3000);
+
+const chatText = $("chat-text");
+chatText.addEventListener("input", () => {
+  $("chat-count").textContent = chatText.value.length;
+});
+
+function showChatError(text) {
+  $("chat-error").textContent = text;
+  $("chat-error").classList.toggle("visible", Boolean(text));
+}
+
+async function sendReply() {
+  const text = chatText.value.trim();
+  if (!text) {
+    showChatError("Type a message first.");
+    chatText.focus();
+    return;
+  }
+  const button = $("chat-send");
+  button.disabled = true;
+  button.textContent = "SENDING...";
+  showChatError("");
+  try {
+    const body = new URLSearchParams({ id: userId, reply_to: reportId || "0", text });
+    const res = await fetch("/reply", { method: "POST", body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Send failed");
+    saveId(data.user_id);
+    chatText.value = "";
+    $("chat-count").textContent = "0";
+    await pollChat();
+  } catch (err) {
+    showChatError(`Could not send: ${err.message}. Try again.`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "SEND MESSAGE";
+  }
+}
+
+$("chat-send").addEventListener("click", sendReply);

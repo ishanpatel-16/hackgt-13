@@ -97,10 +97,27 @@
         </div>
 
         <p id="delivery-status" class="status-note waiting">Transmitting through the local emergency network...</p>
-
-        <button id="send-update" class="secondary-button" type="button">SEND AN UPDATE</button>
-        <p class="reassurance">Stay where you are if it is safe.</p>
       </section>
+
+      <!-- Messages with responders (on the confirmation screen, or any time a message arrives) -->
+      <section id="chat" class="chat" aria-label="Messages with responders" hidden>
+        <div class="section-label">Messages with responders</div>
+        <div id="chat-log" class="chat-log" aria-live="polite">
+          <p id="chat-empty" class="chat-empty">No messages yet. Responders can write to you here, and you can send them updates.</p>
+        </div>
+        <div class="field chat-compose">
+          <label class="visually-hidden" for="chat-text">Message to responders</label>
+          <textarea id="chat-text" rows="2" maxlength="399" placeholder="Send an update: injuries, water level, where you moved..."></textarea>
+          <div class="count"><span id="chat-count">0</span>/399</div>
+        </div>
+        <p id="chat-error" class="inline-message" aria-live="assertive"></p>
+        <button id="chat-send" class="primary-button chat-send" type="button">SEND MESSAGE</button>
+      </section>
+
+      <div id="new-report-block" hidden>
+        <button id="send-update" class="secondary-button" type="button">SEND A NEW REPORT</button>
+        <p class="reassurance">Stay where you are if it is safe.</p>
+      </div>
 
       <p class="uid">Your user ID: <span id="user-id">-</span> · Report ID: <span id="report-id">-</span></p>
     </main>

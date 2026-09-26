@@ -79,12 +79,32 @@ textarea::placeholder, input::placeholder { color: var(--muted); opacity: 1; }
 .status-note { margin: 18px 0; padding: 4px 0 4px 14px; border-left: 3px solid var(--green); color: var(--green); font-size: .9375rem; line-height: 1.6; }
 .status-note.waiting { border-left-color: var(--amber); color: var(--amber); }
 .secondary-button { border: 1px solid #aebdb9; background: #f1f5f3; color: var(--ink); }
+/* Messages with responders */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.chat { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.chat-log { display: flex; flex-direction: column; gap: 10px; }
+.chat-empty { margin: 0; color: var(--muted); font-size: .9375rem; line-height: 1.5; }
+.bubble { max-width: 85%; padding: 10px 12px; border-radius: 10px; font-size: 1rem; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bubble .who { display: block; margin-bottom: 3px; font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.bubble.responder { align-self: flex-start; background: #edf6fc; border: 1px solid #b9d6ea; }
+.bubble.responder .who { color: #216b9b; }
+.bubble.you { align-self: flex-end; background: #f1f5f3; border: 1px solid var(--line); }
+.bubble.you .who { color: var(--muted); }
+.bubble .state { display: block; margin-top: 4px; font-size: .75rem; color: var(--amber); }
+.bubble .state.ok { color: var(--green); }
+.bubble.new { box-shadow: 0 0 0 3px #b9d6ea; }
+.chat-compose { margin-top: 14px; }
+.chat-compose textarea { min-height: 64px; }
+.chat-send { margin-top: 10px; background: var(--ink); border-color: var(--ink); }
+#new-report-block .secondary-button { margin-top: 22px; }
+
 .uid { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: .75rem; text-align: center; }
 @media (hover: hover) {
   .emergency-option:hover { border-color: var(--category-color); background: var(--category-tint); }
   .emergency-option.selected:hover { border-color: var(--category-color); }
   .counter-button:hover, .secondary-button:hover { background: #e2eae6; }
   .primary-button:hover:not(:disabled) { background: #9e2421; }
+  .chat-send:hover:not(:disabled) { background: #0f2027; }
 }
 button:active { transform: translateY(1px); }
 @media (max-width: 380px) {

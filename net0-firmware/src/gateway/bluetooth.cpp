@@ -2,6 +2,7 @@
 // The laptop scans for SERVICE_UUID, connects, and subscribes to
 // notifications on CHARACTERISTIC_UUID. Uplink = notify, downlink = write.
 #include "bluetooth.h"
+#include "backend_codec.h"
 #include "packet.h"
 
 #include <Arduino.h>
@@ -26,6 +27,13 @@ static std::atomic<int> connectionCount{0};  // written by BLE task, read by loo
 static BLEServer *server = nullptr;
 static BLECharacteristic *characteristic = nullptr;
 
+// Downlink (backend -> gateway) state, see DownlinkCallbacks below.
+#define MAX_DOWNLINK_FRAME 1024
+static QueueHandle_t ackQueue;
+static QueueHandle_t messageQueue;  // items are BK_MESSAGE_LEN raw bytes
+static uint8_t rxBuf[2 + MAX_DOWNLINK_FRAME];
+static size_t rxLen = 0;
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *s, esp_ble_gatts_cb_param_t *param) override {
     connectionCount++;
@@ -37,36 +45,59 @@ class ServerCallbacks : public BLEServerCallbacks {
 
   void onDisconnect(BLEServer *s, esp_ble_gatts_cb_param_t *param) override {
     if (connectionCount > 0) connectionCount--;
+    rxLen = 0;  // drop any half-received downlink frame
     Serial.printf("[ble] device disconnected (%d connected)\n", connectionCount.load());
     s->startAdvertising();
   }
 };
 
-// Backend -> gateway. Parse ACK frames and queue their msg_ids; loop() turns
-// them into mesh ACK packets (never send ESP-NOW from inside a BLE callback).
-// frame: [u16 len][type u8][target_node u8][user_id u16][acked_msg_id u32]
-static QueueHandle_t ackQueue;
+// Backend -> gateway. Frames are [u16 len][payload]. One write may hold several
+// frames, and a long frame (a 440-byte message) may be split over several writes,
+// so bytes are collected in rxBuf until a whole frame is there.
+// ACK and message frames go into queues; loop() turns them into mesh packets
+// (never send ESP-NOW from inside a BLE callback).
+//   ack:     [type][target_node][user_id u16][acked_msg_id u32]
+//   message: [type][target_node][user_id u16][reply_to u32][sender 32][text 400]
+
+static void handleDownlinkFrame(const uint8_t *f, size_t len) {
+  if (f[0] == PKT_ACK && len >= 8) {
+    uint32_t acked = f[4] | (f[5] << 8) | (f[6] << 16) | ((uint32_t)f[7] << 24);
+    xQueueSend(ackQueue, &acked, 0);
+  } else if (f[0] == PKT_MESSAGE && len >= BK_MESSAGE_LEN) {
+    if (xQueueSend(messageQueue, f, 0) != pdTRUE) Serial.println("[ble] message queue full, dropped a message");
+  } else {
+    Serial.printf("[ble] ignored downlink type %u (%u bytes)\n", f[0], (unsigned)len);
+  }
+}
 
 class DownlinkCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
     String v = c->getValue();
     const uint8_t *d = (const uint8_t *)v.c_str();
-    size_t off = 0;
-    while (off + 2 <= v.length()) {  // a write may hold more than one frame
-      size_t len = d[off] | (d[off + 1] << 8);
-      const uint8_t *f = d + off + 2;
-      if (len == 0 || off + 2 + len > v.length()) break;
-      if (f[0] == PKT_ACK && len >= 8) {
-        uint32_t acked = f[4] | (f[5] << 8) | (f[6] << 16) | ((uint32_t)f[7] << 24);
-        xQueueSend(ackQueue, &acked, 0);
+    for (size_t i = 0; i < v.length(); i++) {
+      if (rxLen < sizeof(rxBuf)) rxBuf[rxLen++] = d[i];
+      // Peel off every complete frame collected so far.
+      while (rxLen >= 2) {
+        size_t len = rxBuf[0] | (rxBuf[1] << 8);
+        if (len == 0 || len > MAX_DOWNLINK_FRAME) {  // garbage: drop a byte and resync
+          memmove(rxBuf, rxBuf + 1, --rxLen);
+          continue;
+        }
+        if (rxLen < 2 + len) break;  // rest of the frame is still coming
+        handleDownlinkFrame(rxBuf + 2, len);
+        rxLen -= 2 + len;
+        memmove(rxBuf, rxBuf + 2 + len, rxLen);
       }
-      off += 2 + len;
     }
   }
 };
 
 bool nextBackendAck(uint32_t &msgId) {
   return ackQueue && xQueueReceive(ackQueue, &msgId, 0) == pdTRUE;
+}
+
+bool nextBackendMessage(uint8_t *frame) {
+  return messageQueue && xQueueReceive(messageQueue, frame, 0) == pdTRUE;
 }
 
 // ---------- outgoing queue ----------
@@ -157,6 +188,7 @@ static void senderTask(void *) {
 
 void setupBluetooth() {
   ackQueue = xQueueCreate(16, sizeof(uint32_t));
+  messageQueue = xQueueCreate(4, BK_MESSAGE_LEN);
   outQueue = xQueueCreate(QUEUE_LEN, sizeof(Frame));
   BLEDevice::init(DEVICE_NAME);
   BLEDevice::setMTU(517);  // let the laptop negotiate big packets

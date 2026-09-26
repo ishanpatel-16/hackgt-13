@@ -91,16 +91,20 @@ static bool isNeighbor(uint8_t id) {
 static bool isValid(Packet &p) {
   if (p.magic != NET0_MAGIC || p.version != NET0_VERSION) return false;
   if (p.msg_id == 0 || p.path_len > MAX_PATH) return false;
-  if (p.type != PKT_REPORT && p.type != PKT_HEARTBEAT && p.type != PKT_ACK) return false;
+  if (p.type < PKT_REPORT || p.type > PKT_MESSAGE) return false;
   p.location[LOCATION_LEN - 1] = '\0';  // never trust strings off the air
   p.message[MESSAGE_LEN - 1] = '\0';
   return true;
 }
 
 static const char *typeName(uint8_t type) {
-  if (type == PKT_REPORT) return "report";
-  if (type == PKT_ACK) return "ack";
-  return "heartbeat";
+  switch (type) {
+    case PKT_REPORT: return "report";
+    case PKT_USER_REPLY: return "user_reply";
+    case PKT_ACK: return "ack";
+    case PKT_MESSAGE: return "message";
+    default: return "heartbeat";
+  }
 }
 
 // Build a fresh packet originating at this board.

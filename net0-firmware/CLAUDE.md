@@ -42,25 +42,26 @@ Phone → Node (Wi-Fi AP + web form) → other Node(s) relaying → Gateway ESP3
 - **ESP-NOW receive callback:** only copy the packet into a FreeRTOS queue. Process it in `loop()`. Never do slow work (Serial, delays, sends) inside the callback.
 - **Callback signature (core 3.x):** `void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len)`. RSSI comes from `info->rx_ctrl->rssi`.
 
-## Packet (`include/packet.h`, packed struct, version 5)
+## Packet (`include/packet.h`, packed struct, version 6)
 | Field | Type | Notes |
 |---|---|---|
 | magic | uint16 | `0x4E30`, drop anything else |
-| version | uint8 | `5` |
-| type | uint8 | `1` = report, `2` = user_reply (reserved), `3` = heartbeat, `4` = ack, `5` = message (reserved). **Same numbers as the backend's `packet_codec.py`.** |
-| msg_id | uint32 | random, never 0. **Same on every retry of a report** |
+| version | uint8 | `6` (every board must run the same version) |
+| type | uint8 | `1` = report, `2` = user_reply, `3` = heartbeat, `4` = ack, `5` = message. **Same numbers as the backend's `packet_codec.py`.** |
+| msg_id | uint32 | random, never 0. **Same on every retry of a report / user_reply / message** |
 | attempt | uint8 | 0 = first send, +1 per retry |
 | origin | uint8 | node that created it |
 | last_hop | uint8 | node that last transmitted it |
 | ttl | uint8 | default 6 |
-| user_id | uint16 | phone's user ID (reports), 0 = unknown |
-| ref_id | uint32 | ack: the report `msg_id` being acknowledged |
+| user_id | uint16 | report/user_reply: sender's user ID (0 = unknown); message: recipient (0 = everyone on the node) |
+| ref_id | uint32 | ack: the `msg_id` being acknowledged; user_reply/message: the report `msg_id` it's about (0 = none) |
+| target | uint8 | message: node that should show it (`255` = every node) |
 | category | uint8 | reports: backend `Category` (0 unknown, 1 medical, 2 trapped, 3 fire, 8 other), picked on the phone |
 | people | uint8 | reports: people needing help (0 = unknown) |
 | has_gps, lat, lon, accuracy_m | uint8, float, float, uint16 | reports: phone GPS fix (HTTPS page only) |
 | path_len, path[8] | uint8 | node IDs the packet passed through, in order |
-| location | char[64] | user-typed text (GPS later) |
-| message | char[400] | user-typed report |
+| location | char[64] | report: user-typed location; message: sender name (≤ 31 chars) |
+| message | char[400] | report details / user_reply text / message text |
 
 Nodes send a heartbeat every 10 s (used for the node-status panel on the dashboard).
 
@@ -69,7 +70,14 @@ Nodes send a heartbeat every 10 s (used for the node-status panel on the dashboa
 - Dedup (relays and gateway) is keyed on **(msg_id, attempt)**, so a retry is forwarded again instead of being dropped as a duplicate.
 - The gateway forwards every attempt to the backend. The backend dedups on `msg_id` (unique in SQL) and ACKs every copy over BLE.
 - The gateway floods a `PKT_ACK` (`ref_id` = report msg_id). The origin node marks the report delivered and stops retrying. The phone polls `GET /status?id=<hex msg_id>` to show "Delivered".
+- **user_reply** (phone → responders) uses the exact same pending list, retries and ACK as a report.
 - Heartbeats are not retried.
+
+## Messages (responders ↔ phone)
+- **Portal → phone:** backend `POST /api/messages/send` writes a message frame to the gateway over BLE (440 B, may arrive split over several writes; the gateway reassembles). The gateway floods it as `PKT_MESSAGE` 3 times (same `msg_id`, attempt 0/1/2, 1.5 s apart) since nothing ACKs it. The node whose ID is `target` (or every node if 255) keeps it in a 16-line chat log (RAM, shared by all phones on that node) and stops forwarding it if it was only for itself.
+- **Phone → portal:** the page's chat box posts `POST /reply` (`id`, `reply_to` = report msg_id hex, `text`). The node floods a `PKT_USER_REPLY`, retried until the gateway floods back an ACK, and adds it to the chat log too. The gateway encodes it for the backend (type 2, 422 B), which saves it in the `messages` table (`direction = uplink`).
+- The page polls `GET /messages?id=<user_id>&after=0` every 3 s: lines for that user or for everyone, oldest first, with `from` = `responder`/`you` and `delivered` for the phone's own lines. New responder messages vibrate the phone.
+- The chat log is lost if the node reboots (the portal DB keeps the real history).
 
 ## User ID
 Goal: the same phone keeps the same `user_id` (1–65535) whenever possible.
@@ -79,7 +87,7 @@ Goal: the same phone keeps the same `user_id` (1–65535) whenever possible.
 - Phones use a fixed private MAC per network name, so reconnecting to the **same node** gets the same ID. A **different node** (different network name) sees a different MAC → new ID, unless the browser kept its storage. This is accepted.
 
 ## Phone page (`data/`)
-Design from the team's initial user portal (was `user-end/node-esp/data/web-portal/`, commit e33013a). Flow: pick emergency type (Medical / Fire / Trapped / Other → `category`) and people count, optional location text + GPS, details (required for "Other"), then SEND → `POST /send`. The confirmation screen polls `/status` and flips from "SOS SENT" (amber) to "SOS DELIVERED" (green) on the gateway's ACK. "Send an update" goes back to the form keeping type/people/location (sent as a new report until `user_reply` exists). `/whoami` also returns the node ID for the "Connected to local node N" badge.
+Design from the team's initial user portal (was `user-end/node-esp/data/web-portal/`, commit e33013a). Flow: pick emergency type (Medical / Fire / Trapped / Other → `category`) and people count, optional location text + GPS, details (required for "Other"), then SEND → `POST /send`. The confirmation screen polls `/status` and flips from "SOS SENT" (amber) to "SOS DELIVERED" (green) on the gateway's ACK. Below it, a "Messages with responders" chat (see Messages) — also shown on the form screen once any message arrives. "Send a new report" goes back to the form keeping type/people/location. `/whoami` also returns the node ID for the "Connected to local node N" badge.
 
 ## HTTPS + GPS
 Browsers only share location with secure (`https://`) pages.
@@ -105,8 +113,8 @@ Current setup: 3 boards in a line, `node2 → node1 → gateway`. Every node is 
 
 ## Gateway → backend contract (BLE)
 The backend (`portal-end/backend/packets/esp_manager.py`, Ishan) scans for BLE service `7b2f3a91-8c64-4f2e-a7d1-91c8e7b5d421`, device `Gateway-Node`, and subscribes to notifications on characteristic `a12b3c45-6789-4def-8123-456789abcdef`. The gateway keeps advertising while connected, so up to 3 laptops can connect at once (otherwise the first connection hides it from everyone else). These UUIDs are BLE identifiers, unrelated to the mesh `NODE_ID`.
-- **Uplink (gateway → backend):** notifications carrying frames `[uint16 len][payload]`, split into MTU-sized chunks. Payload layouts are defined by `portal-end/backend/packets/packet_codec.py` (report = type 1, 705 B; heartbeat = type 3, 23 B). `src/gateway/backend_codec.h` must match it.
-- **Downlink (backend → gateway):** writes to the same characteristic (acks, type 4). The gateway turns each into a mesh `PKT_ACK`.
+- **Uplink (gateway → backend):** notifications carrying frames `[uint16 len][payload]`, split into MTU-sized chunks. Payload layouts are defined by `portal-end/backend/packets/packet_codec.py` (report = type 1, 705 B; user_reply = type 2, 422 B; heartbeat = type 3, 23 B). `src/gateway/backend_codec.h` must match it.
+- **Downlink (backend → gateway):** writes to the same characteristic, `[uint16 len][payload]` frames, reassembled across writes: acks (type 4, 8 B) → mesh `PKT_ACK`; messages (type 5, 440 B: target, user_id, reply_to, sender[32], text[400]) → mesh `PKT_MESSAGE`.
 - Fields our mesh packet doesn't carry yet (name, phone, severity, needs, clients, uptime, tx/rx, neighbors) are sent as unknown/0. Severity stays 0 (unknown) on purpose: the dashboard AI will decide it later. `user_id` comes from the phone (falls back to one derived from `msg_id` if 0). The gateway (ID 0) is **not** added to `path` because the backend only accepts node IDs 1–254.
 - USB serial (115200) still prints one JSON line per packet for debugging:
 ```json

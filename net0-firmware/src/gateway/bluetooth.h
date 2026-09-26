@@ -13,6 +13,10 @@ bool bluetoothConnected();
 bool queueForBackend(const uint8_t *payload, size_t len, uint32_t msgId);
 unsigned backendQueueDepth();
 
-// Pops the next report msg_id the backend has ACKed (saved). Returns false if none.
+// Pops the next report/user_reply msg_id the backend has ACKed (saved). Returns false if none.
 // The gateway floods these back into the mesh so the origin node stops retrying.
 bool nextBackendAck(uint32_t &msgId);
+
+// Pops the next responder message frame (BK_MESSAGE_LEN bytes, decode with
+// bkDecodeMessage). Returns false if none. The gateway floods it to the nodes.
+bool nextBackendMessage(uint8_t *frame);

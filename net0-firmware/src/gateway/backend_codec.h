@@ -16,10 +16,15 @@
 #define BK_PHONE_MAX      20
 #define BK_LOCATION_MAX   120
 #define BK_REPORT_MSG_MAX 500
+#define BK_SENDER_MAX     32
+#define BK_REPLY_MSG_MAX  400
 #define BK_ROLE_ACCESS    2   // our nodes are access + relay
 #define BK_BATTERY_UNKNOWN 255
 
-#define BK_MAX_PAYLOAD 1024   // report is 705 bytes
+#define BK_MAX_PAYLOAD 1024   // report is 705 bytes, user_reply 422
+
+// Downlink message (backend -> gateway): [type][target_node][user_id u16][reply_to u32][sender 32][text 400]
+#define BK_MESSAGE_LEN (8 + BK_SENDER_MAX + BK_REPLY_MSG_MAX)
 
 // Little writer: appends fixed-width little-endian fields to a buffer.
 struct BkWriter {
@@ -79,6 +84,19 @@ static inline size_t bkEncodeReport(const Packet &p, uint8_t *out) {
   return w.len;
 }
 
+static inline size_t bkEncodeUserReply(const Packet &p, uint8_t *out) {
+  BkWriter w{out, 0};
+  w.u8(PKT_USER_REPLY);
+  w.u32(p.msg_id);
+  w.u8(p.attempt);
+  w.u8(p.origin);
+  w.path(p);
+  w.u16(bkUserId(p));
+  w.u32(p.ref_id);    // reply_to: the report this follows up on
+  w.str(p.message, BK_REPLY_MSG_MAX);
+  return w.len;
+}
+
 static inline size_t bkEncodeHeartbeat(const Packet &p, uint8_t *out) {
   BkWriter w{out, 0};
   w.u8(PKT_HEARTBEAT);
@@ -94,9 +112,28 @@ static inline size_t bkEncodeHeartbeat(const Packet &p, uint8_t *out) {
   return w.len;
 }
 
+// Downlink message from the backend -> mesh PKT_MESSAGE fields (target, user_id,
+// ref_id, sender in location[], text in message[]). False if the frame is too short.
+static inline bool bkDecodeMessage(const uint8_t *f, size_t len, Packet &p) {
+  if (len < BK_MESSAGE_LEN || f[0] != PKT_MESSAGE) return false;
+  p.target = f[1];
+  p.user_id = f[2] | (f[3] << 8);
+  p.ref_id = f[4] | (f[5] << 8) | (f[6] << 16) | ((uint32_t)f[7] << 24);
+  size_t n = strnlen((const char *)f + 8, BK_SENDER_MAX);
+  if (n >= SENDER_LEN) n = SENDER_LEN - 1;
+  memcpy(p.location, f + 8, n);
+  p.location[n] = '\0';
+  n = strnlen((const char *)f + 8 + BK_SENDER_MAX, BK_REPLY_MSG_MAX);
+  if (n >= MESSAGE_LEN) n = MESSAGE_LEN - 1;
+  memcpy(p.message, f + 8 + BK_SENDER_MAX, n);
+  p.message[n] = '\0';
+  return true;
+}
+
 // Returns payload length, or 0 if this packet type isn't sent to the backend.
 static inline size_t bkEncode(const Packet &p, uint8_t *out) {
   if (p.type == PKT_REPORT) return bkEncodeReport(p, out);
+  if (p.type == PKT_USER_REPLY) return bkEncodeUserReply(p, out);
   if (p.type == PKT_HEARTBEAT) return bkEncodeHeartbeat(p, out);
   return 0;
 }

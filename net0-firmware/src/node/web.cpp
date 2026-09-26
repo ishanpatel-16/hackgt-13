@@ -1,4 +1,4 @@
-// Node web side: the report form, served two ways.
+// Node web side: the report form + chat with responders, served two ways.
 //   - HTTP  on port 80:  works on every phone (captive portal popup), no GPS.
 //   - HTTPS on port 443: browsers only share GPS with secure pages. Needs
 //     data/cert.pem + data/key.pem (scripts/make_cert.sh) uploaded with uploadfs.
@@ -77,6 +77,29 @@ static void getQuery(httpd_req_t *req, const char *key, char *out, size_t outLen
   out[0] = '\0';
   char query[64];
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) getParam(query, key, out, outLen);
+}
+
+// Reads the POST body into buf (NUL-terminated). False if it's too big or the upload broke.
+static bool readBody(httpd_req_t *req, char *buf, size_t bufLen) {
+  if (req->content_len >= bufLen) return false;
+  size_t got = 0;
+  while (got < req->content_len) {
+    int r = httpd_req_recv(req, buf + got, req->content_len - got);
+    if (r <= 0) return false;
+    got += r;
+  }
+  buf[got] = '\0';
+  return true;
+}
+
+// Appends s to out as a JSON string literal. Control characters become spaces.
+static void jsonString(String &out, const char *s) {
+  out += '"';
+  for (; *s; s++) {
+    if (*s == '"' || *s == '\\') out += '\\';
+    out += (uint8_t)*s < 0x20 ? ' ' : *s;
+  }
+  out += '"';
 }
 
 static esp_err_t sendJson(httpd_req_t *req, const char *status, const char *json) {
@@ -171,7 +194,7 @@ static esp_err_t handleIndex(httpd_req_t *req) { return sendFile(req, "/index.ht
 static esp_err_t handleCss(httpd_req_t *req) { return sendFile(req, "/style.css", "text/css"); }
 static esp_err_t handleJs(httpd_req_t *req) { return sendFile(req, "/app.js", "application/javascript"); }
 
-// GET /whoami?id=<page's ID or 0> -> {"user_id":4821,"https":"https://192.168.4.1/"}
+// GET /whoami?id=<page's ID or 0> -> {"user_id":4821,"node":2,"https":"https://192.168.4.1/"}
 static esp_err_t handleWhoami(httpd_req_t *req) {
   char idArg[8];
   getQuery(req, "id", idArg, sizeof(idArg));
@@ -189,14 +212,7 @@ static bool validCategory(long c) {
 // POST /send  (form fields: category, people, location, message, id, lat, lon, acc)
 static esp_err_t handleSend(httpd_req_t *req) {
   char body[2048];
-  if (req->content_len >= sizeof(body)) return sendJson(req, "413 Payload Too Large", "{\"error\":\"Report too long\"}");
-  size_t got = 0;
-  while (got < req->content_len) {
-    int r = httpd_req_recv(req, body + got, req->content_len - got);
-    if (r <= 0) return sendJson(req, "400 Bad Request", "{\"error\":\"Upload failed\"}");
-    got += r;
-  }
-  body[got] = '\0';
+  if (!readBody(req, body, sizeof(body))) return sendJson(req, "400 Bad Request", "{\"error\":\"Report too long or upload failed\"}");
 
   char location[LOCATION_LEN * 3], message[MESSAGE_LEN * 3], idArg[8], lat[16], lon[16], acc[8];
   char categoryArg[4], peopleArg[6];
@@ -239,7 +255,63 @@ static esp_err_t handleSend(httpd_req_t *req) {
   return sendJson(req, "200 OK", json);
 }
 
-// GET /status?id=A83F29C1 -> {"delivered":true,"attempts":2}
+// POST /reply  (form fields: id, reply_to = report msg_id in hex, text)
+// A follow-up from the phone to responders (user_reply packet), retried until ACKed.
+static esp_err_t handleReply(httpd_req_t *req) {
+  char body[1536];
+  if (!readBody(req, body, sizeof(body))) return sendJson(req, "400 Bad Request", "{\"error\":\"Message too long or upload failed\"}");
+
+  char idArg[8], replyArg[12], text[MESSAGE_LEN * 3];
+  getParam(body, "id", idArg, sizeof(idArg));
+  getParam(body, "reply_to", replyArg, sizeof(replyArg));
+  getParam(body, "text", text, sizeof(text));
+  trim(text);
+  if (!text[0]) return sendJson(req, "400 Bad Request", "{\"error\":\"Type a message first\"}");
+
+  uint16_t userId = resolveUserId(req, parseUserId(idArg));
+  uint32_t replyTo = strtoul(replyArg, nullptr, 16);
+  uint32_t msgId = nodeSendReply(userId, replyTo, text);
+  Serial.printf("[web] reply %08X from user %u about %08X: %s\n", msgId, userId, replyTo, text);
+
+  char json[48];
+  snprintf(json, sizeof(json), "{\"msg_id\":\"%08X\",\"user_id\":%u}", msgId, userId);
+  return sendJson(req, "200 OK", json);
+}
+
+// GET /messages?id=4821&after=0 -> {"messages":[{"seq":1,"from":"responder","sender":"Portal",
+//   "text":"Help is 10 min away","delivered":false,"msg_id":"1A2B3C4D"}, ...]}
+// Lines for this user (and for everyone) newer than `after`, oldest first.
+static esp_err_t handleMessages(httpd_req_t *req) {
+  char idArg[8], afterArg[12];
+  getQuery(req, "id", idArg, sizeof(idArg));
+  getQuery(req, "after", afterArg, sizeof(afterArg));
+  uint16_t userId = parseUserId(idArg);
+  uint32_t seq = strtoul(afterArg, nullptr, 10);
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_sendstr_chunk(req, "{\"messages\":[");
+  ChatEntry e;
+  String line;
+  bool first = true;
+  while (userId && nodeNextChat(userId, seq, e)) {  // one line at a time: ChatEntry is ~450 B
+    seq = e.seq;
+    char head[96];
+    snprintf(head, sizeof(head), "%s{\"seq\":%u,\"msg_id\":\"%08X\",\"from\":\"%s\",\"delivered\":%s,\"sender\":",
+             first ? "" : ",", e.seq, e.msgId, e.fromUser ? "you" : "responder", e.delivered ? "true" : "false");
+    line = head;
+    jsonString(line, e.sender);
+    line += ",\"text\":";
+    jsonString(line, e.text);
+    line += '}';
+    if (httpd_resp_sendstr_chunk(req, line.c_str()) != ESP_OK) return ESP_FAIL;
+    first = false;
+  }
+  httpd_resp_sendstr_chunk(req, "]}");
+  return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
+// GET /status?id=A83F29C1 -> {"delivered":true,"attempts":2}   (reports and replies)
 static esp_err_t handleStatus(httpd_req_t *req) {
   char idArg[12];
   getQuery(req, "id", idArg, sizeof(idArg));
@@ -267,6 +339,8 @@ static void addRoutes(httpd_handle_t server) {
       {"/whoami", HTTP_GET, handleWhoami, nullptr},
       {"/send", HTTP_POST, handleSend, nullptr},
       {"/status", HTTP_GET, handleStatus, nullptr},
+      {"/reply", HTTP_POST, handleReply, nullptr},
+      {"/messages", HTTP_GET, handleMessages, nullptr},
   };
   for (const httpd_uri_t &r : routes) httpd_register_uri_handler(server, &r);
   httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, redirectToForm);
@@ -300,7 +374,7 @@ void webBegin() {
   http.server_port = 80;
   http.ctrl_port = 32768;
   http.stack_size = 8192;
-  http.max_uri_handlers = 10;
+  http.max_uri_handlers = 12;
   http.lru_purge_enable = true;  // phones open many connections; drop idle ones
   if (httpd_start(&httpServer, &http) == ESP_OK) addRoutes(httpServer);
   else Serial.println("[web] HTTP server failed to start");
@@ -321,7 +395,7 @@ void webBegin() {
     https.prvtkey_len = keyLen;
     https.httpd.ctrl_port = 32769;  // each server needs its own control port
     https.httpd.stack_size = 12288;
-    https.httpd.max_uri_handlers = 10;
+    https.httpd.max_uri_handlers = 12;
     https.httpd.max_open_sockets = 3;  // each TLS connection uses ~25 KB of RAM
     https.httpd.lru_purge_enable = true;
     https.httpd.global_user_ctx = &secureMarker;
