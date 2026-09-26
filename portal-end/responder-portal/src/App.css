@@ -250,3 +250,30 @@ blockquote { margin: 0 0 20px; background: #222d37; border-radius: 9px; padding:
   .workspace .geo-title { left: 8px; top: 8px; }
   .workspace .geo-legend { left: 8px; max-width: calc(100% - 65px); }
 }
+
+/* True-black canvas with brighter, readable operational surfaces. */
+.portal-header { background: #101010; }
+.panel, .map-popup, .net0-map-popup .leaflet-popup-content-wrapper,
+.net0-map-popup .leaflet-popup-tip { background: #191b1e; color: #f5f7fa; }
+.workspace > .queue-panel { background: #161719; }
+.incident { background: #23262b; }
+.incident:hover { background: #30353b; }
+.medical { --incident-color: #a0d7ff; --incident-bg: #203b51; }
+.fire { --incident-color: #ffb47c; --incident-bg: #493020; }
+.trapped { --incident-color: #f2d17a; --incident-bg: #42391e; }
+.agent-panel { background: #1b2026; border-left-color: #a1b9cc; }
+.agent-panel h2, .agent-content h3 { color: #e0edf8; }
+.agent-content .brief-highlights li { color: #eef5fc; }
+blockquote { background: #272a2e; }
+.reports-button, .popup-close, .fit-network { background: #34383f; color: #fff; }
+.node-count strong { color: #fff; }
+.geo-canvas, .map-surface { background: #000; }
+.geo-title, .geo-legend { background: #17191cf5; color: #f5f7fa; }
+.street-name { color: #d3dbe4; text-shadow: 0 1px 3px #000; }
+.geo-marker.device { background: #254335; color: #d0f8df; border-color: #98d6b0; }
+.geo-marker.device.unknown { background: #343c45; color: #edf2f8; border-color: #acbac9; }
+.geo-marker.device.offline { background: #57272a; color: #ffc7bf; border-color: #ff9b90; }
+.leaflet-control-zoom a { background: #292d33; color: white; border-color: #5b646e; }
+.leaflet-container .leaflet-control-attribution { background: #101010; color: #c6cdd5; }
+.leaflet-control-attribution a { color: #d0e5f8; }
+.network-panel { background: transparent; }

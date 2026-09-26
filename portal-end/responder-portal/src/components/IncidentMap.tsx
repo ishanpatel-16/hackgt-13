@@ -48,9 +48,9 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
           interactive: false,
           style: feature => {
             const p = feature?.properties
-            return p?.building ? { color: '#364452', weight: .5, fillColor: '#2c3948', fillOpacity: .9 }
-              : p?.leisure ? { color: '#253e35', weight: 1, fillColor: '#213b30', fillOpacity: .8 }
-              : { color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#7a8692' : '#4c5b69', weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2, opacity: .85 }
+            return p?.building ? { color: '#58616c', weight: .5, fillColor: '#353d47', fillOpacity: .9 }
+              : p?.leisure ? { color: '#3f6250', weight: 1, fillColor: '#203a2a', fillOpacity: .8 }
+              : { color: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? '#b4bdc8' : '#747f8d', weight: ['motorway', 'trunk', 'primary'].includes(p?.highway) ? 3 : 1.2, opacity: .85 }
           },
           onEachFeature: (feature, layer) => {
             if (feature.properties?.name && feature.properties?.highway && ['primary', 'secondary', 'tertiary'].includes(feature.properties.highway)) {
@@ -97,7 +97,7 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
         if (seen.has(key)) return
         seen.add(key)
         const offline = status(node.name) === 'OFFLINE' || status(other.name) === 'OFFLINE'
-        L.polyline([point, mockDeviceCoordinates[other.id]], { color: offline ? '#77504f' : '#69857a', weight: 1, opacity: offline ? .25 : .4, dashArray: '4 7', interactive: false }).addTo(layers)
+        L.polyline([point, mockDeviceCoordinates[other.id]], { color: offline ? '#77504f' : '#91b8a6', weight: 1, opacity: offline ? .25 : .4, dashArray: '4 7', interactive: false }).addTo(layers)
       })
       const state = status(node.name)
       marker(point, `${deviceName(node.name)} — ${state ?? 'status unavailable'}`, node.role === 'Gateway' ? '⌂' : node.role === 'Relay' ? '↔' : 'A', `device ${state?.toLowerCase() ?? 'unknown'} ${selectedNodeId === node.id ? 'chosen' : ''}`, () => onSelectNode(node.id))
@@ -109,7 +109,7 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
       if (origin && path.every(node => node !== undefined)) {
         const points = [origin, ...path.map(node => mockDeviceCoordinates[node!.id])]
         const interrupted = path.some(node => status(node!.name) === 'OFFLINE')
-        L.polyline(points, { color: interrupted ? '#d59b76' : '#9bbbc9', weight: 3, opacity: .9, dashArray: interrupted ? '4 8' : undefined, interactive: false }).addTo(layers)
+        L.polyline(points, { color: interrupted ? '#d59b76' : '#c8e3f5', weight: 3, opacity: .9, dashArray: interrupted ? '4 8' : undefined, interactive: false }).addTo(layers)
       }
     }
     incidents.forEach(incident => {
