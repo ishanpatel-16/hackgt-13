@@ -9,5 +9,6 @@ class UserOut(BaseModel):
     user_id: int
     name: str
     phone: str
+    origin: int | None = None
     first_seen: datetime
     last_seen: datetime

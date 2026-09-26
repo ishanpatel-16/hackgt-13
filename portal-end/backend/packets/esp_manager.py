@@ -69,15 +69,21 @@ def _on_notify(sender, data: bytearray):
     )
 
 
-def _queue_downlink(framed: bytes) -> None:
+def queue_downlink(framed: bytes) -> bool:
+    """Queue framed downlink bytes for BLE write. Returns False if gateway is not ready."""
 
     if _downlink_queue is None or _loop is None:
-        return
+        return False
 
     _loop.call_soon_threadsafe(
         _downlink_queue.put_nowait,
         framed,
     )
+    return True
+
+
+def _queue_downlink(framed: bytes) -> None:
+    queue_downlink(framed)
 
 
 async def _process_uplink(chunk: bytes):

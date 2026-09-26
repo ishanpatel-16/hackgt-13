@@ -136,13 +136,16 @@ def build() -> Path:
     pdf.h2("2.1 users")
     pdf.body(
         "People who send SOS reports or chat messages over the mesh. "
-        "Primary key is the mesh user_id (not autoincrement)."
+        "Primary key is the mesh user_id (not autoincrement). "
+        "On real BLE traffic, users are created/upserted from Report and UserReply "
+        "packets; origin is set from the packet's access-node ID."
     )
     pdf.h3("Fields")
     for row in [
         ("user_id", "INTEGER PK", "Unique mesh user identifier (1-65535). Comes from the phone/client packet."),
         ("name", "VARCHAR(32)", "Display name from the report packet (may be empty)."),
         ("phone", "VARCHAR(20)", "Contact phone from the report packet (may be empty)."),
+        ("origin", "INTEGER NULL", "Access-node ID the phone used to enter the mesh. Set from Report/UserReply origin; required to route downlink messages via POST /api/messages/send."),
         ("first_seen", "DATETIME", "UTC timestamp when this user was first created in the portal DB."),
         ("last_seen", "DATETIME", "UTC timestamp of the most recent packet or API update for this user."),
     ]:
@@ -150,6 +153,8 @@ def build() -> Path:
     pdf.h3("Relationships")
     pdf.bullet("reports - one-to-many Report rows (cascade delete-orphan)")
     pdf.bullet("messages - one-to-many Message rows (cascade delete-orphan)")
+    pdf.h3("API response schema (UserOut)")
+    pdf.bullet("Same fields as above: user_id, name, phone, origin, first_seen, last_seen.")
 
     pdf.h2("2.2 reports")
     pdf.body(
@@ -188,27 +193,33 @@ def build() -> Path:
 
     pdf.h2("2.3 messages")
     pdf.body(
-        "Chat / reply traffic between responders and users. Uplink user_reply packets "
-        "create rows with direction='uplink'; portal replies typically use direction='downlink'."
+        "Chat / reply traffic between responders and users. Uplink UserReply packets "
+        "create rows with direction='uplink'; POST /api/messages/send creates "
+        "direction='downlink' rows and encodes a binary downlink Message for the gateway over BLE. "
+        "HTTP paths use upstream/downstream naming; the DB direction column keeps uplink/downlink."
     )
     pdf.h3("Fields")
     for row in [
         ("id", "INTEGER PK", "Autoincrement portal primary key."),
-        ("msg_id", "INTEGER NULL UNIQUE INDEX", "Mesh message ID when applicable; used for uplink dedup. May be null for portal-only messages."),
-        ("direction", "VARCHAR(8)", "'uplink' (user to portal) or 'downlink' (portal to user)."),
+        ("msg_id", "INTEGER NULL UNIQUE INDEX", "Mesh message ID when applicable; used for uplink dedup. Null for portal-sent downlinks from /api/messages/send."),
+        ("direction", "VARCHAR(8)", "'uplink' (user to portal / UserReply) or 'downlink' (portal to user / send)."),
         ("user_id", "INTEGER FK NULL INDEX", "Foreign key to users.user_id when tied to a user; nullable."),
-        ("reply_to", "INTEGER INDEX", "msg_id this message replies to (0 if none)."),
-        ("target_node", "INTEGER NULL", "Destination / origin node ID for routing context."),
-        ("path", "JSON NULL", "Optional hop path associated with the message."),
-        ("sender", "VARCHAR(32)", "Sender label (often empty on uplink; set for responder downlink)."),
+        ("reply_to", "INTEGER INDEX", "msg_id this message replies to (0 if none). On send, defaults to the user's latest report msg_id when omitted."),
+        ("target_node", "INTEGER NULL", "For uplink: packet origin. For downlink send: users.origin (access node to route to)."),
+        ("path", "JSON NULL", "Optional hop path associated with the message (set on uplink UserReply)."),
+        ("sender", "VARCHAR(32)", "Sender label (empty on uplink; default 'Portal' for /api/messages/send)."),
         ("text", "VARCHAR(400)", "Message body text."),
-        ("status", "VARCHAR(16)", "Delivery/processing status (default 'pending' on create; 'received' for uplinks)."),
+        ("status", "VARCHAR(16)", "'received' for uplinks; 'sent' if BLE queued, 'pending' if gateway not connected (send); default 'pending' on plain POST create."),
         ("created_at", "DATETIME", "When the message row was created."),
     ]:
         pdf.field(*row)
     pdf.h3("Relationships / constraints")
     pdf.bullet("user - many-to-one User via user_id (optional)")
     pdf.bullet("UNIQUE (msg_id) - uq_messages_msg_id")
+    pdf.h3("API response schema (MessageOut)")
+    pdf.bullet(
+        "id, msg_id, direction, user_id, reply_to, target_node, path, sender, text, status, created_at."
+    )
 
     pdf.h2("2.4 nodes")
     pdf.body(
@@ -307,16 +318,48 @@ def build() -> Path:
     )
     pdf.route(
         "GET",
+        "/api/messages/upstream/{user_id}",
+        "List uplink messages for a user (direction='uplink'), newest-first.",
+        [
+            "Path: user_id - mesh user id.",
+            "Query: limit? (1-500, default 100).",
+            "404 if user does not exist.",
+        ],
+    )
+    pdf.route(
+        "GET",
+        "/api/messages/downstream/{user_id}",
+        "List downlink messages for a user (direction='downlink'), newest-first.",
+        [
+            "Path: user_id - mesh user id.",
+            "Query: limit? (1-500, default 100).",
+            "404 if user does not exist.",
+        ],
+    )
+    pdf.route(
+        "POST",
+        "/api/messages/send",
+        "Send a downlink Message to a user: save DB row and queue binary packet over BLE.",
+        [
+            "Body: user_id (required), text (required, max 400), sender? (default 'Portal'), reply_to? (defaults to latest report msg_id or 0).",
+            "target_node is taken from users.origin.",
+            "Encodes packets.serial_schema.Message via encode_downlink + frame_packet, then queue_downlink.",
+            "Returns MessageOut with status 'sent' if BLE queue accepted, 'pending' if gateway not connected.",
+            "400 if user has no origin; 404 if user missing. 201 on success.",
+        ],
+    )
+    pdf.route(
+        "GET",
         "/api/messages/{message_id}",
         "Get by primary id, falling back to msg_id.",
     )
     pdf.route(
         "POST",
         "/api/messages",
-        "Create a message; auto-creates empty user if user_id given and missing.",
+        "Create a message row only (does not send over BLE); auto-creates empty user if user_id given and missing.",
         [
             "Body: text (required), msg_id?, direction?, user_id?, reply_to?, target_node?, path?, sender?, status?",
-            "409 if msg_id already exists.",
+            "409 if msg_id already exists. Prefer POST /api/messages/send to deliver to a phone.",
         ],
     )
     pdf.route("PATCH", "/api/messages/{message_id}", "Partial update by id or msg_id.")
@@ -372,12 +415,21 @@ def build() -> Path:
     pdf.bullet("Default DB URL: sqlite:///./portal.db (override with DATABASE_URL).")
     pdf.bullet("Schema migrations live under alembic/versions/; models also drive create_all on startup.")
     pdf.bullet(
+        "Migration c3d4e5f6a7b8 adds users.origin (nullable INTEGER). "
+        "Run alembic upgrade head on existing DBs."
+    )
+    pdf.bullet(
         "Packet wire format still includes severity for protocol compatibility, "
         "but reports no longer store severity; priority is ai_priority only."
     )
     pdf.bullet(
         "AI responder values: medical_ems, fire_rescue, law_enforcement, "
         "technical_sar, humanitarian_care, coast_guard."
+    )
+    pdf.bullet(
+        "Chat path: UserReply uplink -> messages(direction=uplink) + Ack; "
+        "POST /api/messages/send -> messages(direction=downlink) + BLE binary Message. "
+        "List with GET /api/messages/upstream|downstream/{user_id}."
     )
     pdf.bullet("Live OpenAPI: http://localhost:<port>/docs")
 

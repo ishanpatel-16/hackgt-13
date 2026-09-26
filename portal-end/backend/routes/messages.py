@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.message import Message
+from models.report import Report
 from models.user import User
+from packets.esp_manager import queue_downlink
+from packets.packet_codec import encode_downlink, frame_packet
+from packets.serial_schema import REPLY_MSG_MAX, SENDER_MAX
+from packets.serial_schema import Message as DownlinkMessage
 from schemas.message import MessageOut
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -36,6 +41,13 @@ class MessageUpdate(BaseModel):
     status: Optional[str] = None
 
 
+class MessageSend(BaseModel):
+    user_id: int = Field(ge=1, le=65535)
+    text: str = Field(min_length=1, max_length=REPLY_MSG_MAX)
+    sender: str = Field(default="Portal", max_length=SENDER_MAX)
+    reply_to: Optional[int] = Field(default=None, ge=0, le=4294967295)
+
+
 @router.get("", response_model=list[MessageOut])
 def list_messages(
     user_id: Optional[int] = Query(None),
@@ -52,6 +64,96 @@ def list_messages(
     if reply_to is not None:
         q = q.filter(Message.reply_to == reply_to)
     return q.limit(limit).all()
+
+
+@router.post("/send", response_model=MessageOut, status_code=201)
+def send_message(payload: MessageSend, db: Session = Depends(get_db)):
+    """Create a downlink message for a user and queue it to the gateway over BLE."""
+    user = db.get(User, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.origin is None:
+        raise HTTPException(
+            status_code=400,
+            detail="User has no origin node; cannot route downlink",
+        )
+
+    reply_to = payload.reply_to
+    if reply_to is None:
+        latest = (
+            db.query(Report)
+            .filter(Report.user_id == payload.user_id)
+            .order_by(Report.created_at.desc())
+            .first()
+        )
+        reply_to = latest.msg_id if latest is not None else 0
+
+    downlink = DownlinkMessage(
+        target_node=user.origin,
+        user_id=payload.user_id,
+        reply_to=reply_to,
+        sender=payload.sender,
+        text=payload.text,
+    )
+
+    now = datetime.now(timezone.utc)
+    msg = Message(
+        msg_id=None,
+        direction="downlink",
+        user_id=payload.user_id,
+        reply_to=reply_to,
+        target_node=user.origin,
+        path=None,
+        sender=payload.sender,
+        text=payload.text,
+        status="pending",
+        created_at=now,
+    )
+    db.add(msg)
+    db.flush()
+
+    framed = frame_packet(encode_downlink(downlink))
+    msg.status = "sent" if queue_downlink(framed) else "pending"
+
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+def _messages_for_user(
+    db: Session,
+    user_id: int,
+    direction: str,
+    limit: int,
+) -> list[Message]:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return (
+        db.query(Message)
+        .filter(Message.user_id == user_id, Message.direction == direction)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+@router.get("/upstream/{user_id}", response_model=list[MessageOut])
+def list_upstream_messages(
+    user_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    return _messages_for_user(db, user_id, "uplink", limit)
+
+
+@router.get("/downstream/{user_id}", response_model=list[MessageOut])
+def list_downstream_messages(
+    user_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    return _messages_for_user(db, user_id, "downlink", limit)
 
 
 @router.get("/{message_id}", response_model=MessageOut)
