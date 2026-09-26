@@ -1,20 +1,15 @@
 import json
-import random
 from datetime import datetime, timezone
-from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
-from database import Base, engine, get_db, SessionLocal
+from database import get_db
 from models.user import User
 from models.report import Report
 from models.node import Node, utcnow
 from models.message import Message
-from packets.packet_handler import handle_uplink
-from packets.serial_schema import Report as ReportPkt, UserReply as UserReplyPkt, Heartbeat as HeartbeatPkt, Neighbor, Role
 
 router = APIRouter(prefix="/api/debug", tags=["debug"])
 
@@ -193,142 +188,3 @@ def reset_db(db: Session = Depends(get_db)):
     db.query(User).delete()
     db.commit()
     return {"status": "reset", "detail": "all tables truncated"}
-
-
-# ---------- fake inject ----------
-
-class FakeHeartbeat(BaseModel):
-    node: int = Field(ge=1, le=254)
-    role: int = 1
-    clients: int = 0
-    path: list[int] = Field(default_factory=lambda: [1])
-    uptime_s: int = 0
-    tx: int = 0
-    rx: int = 0
-    battery: Optional[int] = None
-    neighbors: list[dict] = Field(default_factory=list)
-
-@router.post("/fake/heartbeat")
-def fake_heartbeat(payload: FakeHeartbeat):
-    # build serial_schema Heartbeat and pass through handler
-    neighbors = [Neighbor(id=n.get("id",1), rssi=n.get("rssi",-70)) for n in payload.neighbors]
-    pkt = HeartbeatPkt(
-        type="heartbeat",
-        node=payload.node,
-        role=Role(payload.role),
-        clients=payload.clients,
-        path=payload.path,
-        uptime_s=payload.uptime_s,
-        tx=payload.tx,
-        rx=payload.rx,
-        battery=payload.battery,
-        neighbors=neighbors,
-    )
-    handle_uplink(pkt, send_downlink=None)
-    return {"status": "ok", "type": "heartbeat", "node": payload.node}
-
-
-class FakeReport(BaseModel):
-    msg_id: int
-    attempt: int = 0
-    origin: int = 1
-    path: list[int] = Field(default_factory=lambda: [1])
-    user_id: int = 1
-    category: int = 1
-    severity: int = 1
-    people: int = 1
-    needs: int = 0
-    name: str = "Test User"
-    phone: str = "1234567890"
-    location: str = "Test Location"
-    message: str = "Help needed"
-    gps_lat: Optional[float] = None
-    gps_lon: Optional[float] = None
-    gps_accuracy: Optional[int] = None
-
-@router.post("/fake/report")
-def fake_report(payload: FakeReport):
-    from packets.serial_schema import Gps
-    gps = None
-    if payload.gps_lat is not None and payload.gps_lon is not None:
-        gps = Gps(lat=payload.gps_lat, lon=payload.gps_lon, accuracy_m=payload.gps_accuracy or 10)
-    pkt = ReportPkt(
-        type="report",
-        msg_id=payload.msg_id,
-        attempt=payload.attempt,
-        origin=payload.origin,
-        path=payload.path,
-        user_id=payload.user_id,
-        category=payload.category,
-        severity=payload.severity,
-        people=payload.people,
-        needs=payload.needs,
-        gps=gps,
-        name=payload.name,
-        phone=payload.phone,
-        location=payload.location,
-        message=payload.message,
-    )
-    handle_uplink(pkt, send_downlink=None)
-    return {"status": "ok", "type": "report", "msg_id": payload.msg_id}
-
-
-class FakeUserReply(BaseModel):
-    msg_id: int
-    attempt: int = 0
-    origin: int = 1
-    path: list[int] = Field(default_factory=lambda: [1])
-    user_id: int = 1
-    reply_to: int = 0
-    text: str = "User reply"
-
-@router.post("/fake/user_reply")
-def fake_user_reply(payload: FakeUserReply):
-    pkt = UserReplyPkt(
-        type="user_reply",
-        msg_id=payload.msg_id,
-        attempt=payload.attempt,
-        origin=payload.origin,
-        path=payload.path,
-        user_id=payload.user_id,
-        reply_to=payload.reply_to,
-        text=payload.text,
-    )
-    handle_uplink(pkt, send_downlink=None)
-    return {"status": "ok", "type": "user_reply", "msg_id": payload.msg_id}
-
-
-@router.post("/seed_random")
-def seed_random(count: int = 5, db: Session = Depends(get_db)):
-    """Quickly seed N random rows for demo/testing."""
-    now = datetime.now(timezone.utc)
-    created = {"users":0, "nodes":0, "reports":0, "messages":0}
-    # users
-    for i in range(count):
-        uid = random.randint(1000, 9999)
-        if not db.get(User, uid):
-            db.add(User(user_id=uid, name=f"User {uid}", phone=f"555{uid}", first_seen=now, last_seen=now))
-            created["users"]+=1
-    db.flush()
-    # nodes
-    for i in range(count):
-        nid = random.randint(10, 50)
-        if not db.get(Node, nid):
-            db.add(Node(node_id=nid, role=random.choice([1,2]), status="online", clients=random.randint(0,5), path=[nid,9], uptime_s=random.randint(0,10000), tx=random.randint(0,100), rx=random.randint(0,100), battery=random.randint(20,100), neighbors=[{"id": random.randint(1,9), "rssi": -70}], last_seen=now))
-            created["nodes"]+=1
-    db.flush()
-    # reports
-    user_ids = [u.user_id for u in db.query(User).all()] or [1]
-    for i in range(count):
-        msg_id = random.randint(100000, 999999)
-        if db.query(Report).filter(Report.msg_id==msg_id).first():
-            continue
-        uid = random.choice(user_ids)
-        db.add(Report(msg_id=msg_id, attempt=0, user_id=uid, origin=random.randint(1,5), path=[random.randint(1,5),9], category=random.randint(1,8), severity=random.randint(1,4), people=random.randint(1,5), needs=random.randint(0,255), location=f"Area {random.randint(1,99)}", message=f"Emergency {msg_id}", status="received", created_at=now, acked_at=now))
-        created["reports"]+=1
-    # messages
-    for i in range(count):
-        db.add(Message(msg_id=None, direction=random.choice(["uplink","downlink"]), user_id=random.choice(user_ids), reply_to=0, target_node=random.randint(1,9), path=[1,9], sender="Responder", text=f"Message {i}", status="pending", created_at=now))
-        created["messages"]+=1
-    db.commit()
-    return {"status":"seeded", **created}

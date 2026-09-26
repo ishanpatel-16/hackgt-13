@@ -89,8 +89,6 @@
     </select>
     <button class="danger" onclick="doReset()">⚠ Reset all</button>
     <span class="spacer"></span>
-    <input id="seedCount" type="number" value="5" min="1" max="50" style="width:70px">
-    <button class="primary" onclick="seedRandom()">Seed random</button>
     <label class="pill" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="autoPoll" checked onchange="togglePoll()"> auto 5s</label>
   </div>
   <div class="tabs" id="tabs">
@@ -98,7 +96,6 @@
     <div class="tab" data-tab="nodes">Nodes</div>
     <div class="tab" data-tab="users">Users</div>
     <div class="tab" data-tab="messages">Messages</div>
-    <div class="tab" data-tab="fake">Fake Inject</div>
     <div class="tab" data-tab="help">Help</div>
   </div>
   <div class="panel" id="panel-reports">
@@ -247,43 +244,6 @@
       </div>
     </div>
   </div>
-  <div class="panel" id="panel-fake" style="display:none">
-    <h3>Fake hardware inject (goes through <code>handle_uplink</code> like real BLE)</h3>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-      <div class="form">
-        <h3>Heartbeat</h3>
-        <div class="form-grid full">
-          <label>node <input id="f-h-node" type="number" value="1"></label>
-          <label>role <select id="f-h-role"><option value="1" selected>relay</option><option value="2">access</option><option value="3">gateway</option></select></label>
-          <label>path <input id="f-h-path" value="1,9"></label>
-          <label>neighbors JSON <input id="f-h-neigh" value='[{"id":9,"rssi":-65}]'></label>
-        </div>
-        <button class="primary" style="margin-top:8px" onclick="fakeHeartbeat()">Send heartbeat</button>
-      </div>
-      <div class="form">
-        <h3>Report (SOS)</h3>
-        <div class="form-grid full">
-          <label>msg_id <input id="f-r-msg" type="number" placeholder="random if empty"></label>
-          <label>user_id <input id="f-r-user" type="number" value="42"></label>
-          <label>location <input id="f-r-loc" value="Bldg A"></label>
-        </div>
-        <button class="primary" style="margin-top:8px" onclick="fakeReport()">Send report</button>
-      </div>
-      <div class="form">
-        <h3>User reply</h3>
-        <div class="form-grid full">
-          <label>msg_id <input id="f-u-msg" type="number" placeholder="random"></label>
-          <label>user_id <input id="f-u-user" type="number" value="42"></label>
-          <label>reply_to (msg_id) <input id="f-u-reply" type="number" value="0"></label>
-          <label>text <input id="f-u-text" value="We need water"></label>
-        </div>
-        <button class="primary" style="margin-top:8px" onclick="fakeUserReply()">Send reply</button>
-      </div>
-    </div>
-    <details style="margin-top:12px"><summary>How sharing works (seed_data.json)</summary>
-      <p class="help">1) Hit <b>Export</b> to download your local <code>seed_data.json</code> (all 4 tables). 2) Commit that file to git. 3) Teammate pulls and hits <b>Import (merge)</b> or runs <code>python scripts/seed_db.py</code>. Schema changes: run <code>alembic upgrade head</code> first — see Help tab.</p>
-    </details>
-  </div>
   <div class="panel" id="panel-help" style="display:none">
     <h3>How to use</h3>
     <ul class="help" style="line-height:1.7">
@@ -297,7 +257,6 @@
       <h3>Quick cURL</h3>
       <pre class="mono" style="white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)">curl http://localhost:8000/api/stats
 curl http://localhost:8000/api/reports | jq
-curl -X POST http://localhost:8000/api/debug/seed_random?count=5
 curl http://localhost:8000/api/debug/export | jq > seed_data.json</pre>
     </div>
   </div>
@@ -560,28 +519,6 @@ async function doImport(ev){
   ev.target.value='';
 }
 async function doReset(){ if(!confirm('Reset ALL tables? This deletes every row.')) return; try{ await api('/api/debug/reset',{method:'POST'}); toast('reset done'); loadAll(); }catch(e){toast(e.message,false)} }
-async function seedRandom(){ try{ const c=parseInt($('#seedCount').value||5); await api('/api/debug/seed_random?count='+c,{method:'POST'}); toast('seeded '+c); loadAll(); }catch(e){toast(e.message,false)} }
-async function fakeHeartbeat(){
-  try{
-    const body={node: parseInt($('#f-h-node').value), role: parseInt($('#f-h-role').value), path: $('#f-h-path').value.split(',').map(s=>parseInt(s.trim())).filter(Boolean), neighbors: JSON.parse($('#f-h-neigh').value||'[]')};
-    await api('/api/debug/fake/heartbeat',{method:'POST', body:JSON.stringify(body)});
-    toast('heartbeat sent'); loadNodes(); loadStats();
-  }catch(e){ toast(e.message,false); }
-}
-async function fakeReport(){
-  try{
-    const body={msg_id: $('#f-r-msg').value? parseInt($('#f-r-msg').value): Math.floor(Math.random()*900000+100000), user_id: parseInt($('#f-r-user').value), location: $('#f-r-loc').value, origin:1, path:[1,9], category:1, severity:1, message:'Fake SOS'};
-    await api('/api/debug/fake/report',{method:'POST', body:JSON.stringify(body)});
-    toast('report injected'); loadReports(); loadStats();
-  }catch(e){ toast(e.message,false); }
-}
-async function fakeUserReply(){
-  try{
-    const body={msg_id: $('#f-u-msg').value? parseInt($('#f-u-msg').value): Math.floor(Math.random()*900000+100000), user_id: parseInt($('#f-u-user').value), reply_to: parseInt($('#f-u-reply').value), text: $('#f-u-text').value};
-    await api('/api/debug/fake/user_reply',{method:'POST', body:JSON.stringify(body)});
-    toast('reply injected'); loadMessages(); loadStats();
-  }catch(e){ toast(e.message,false); }
-}
 function togglePoll(){ if($('#autoPoll').checked) startPoll(); else stopPoll(); }
 function startPoll(){ stopPoll(); pollTimer=setInterval(loadAll, 5000); }
 function stopPoll(){ if(pollTimer) clearInterval(pollTimer); pollTimer=null; }
