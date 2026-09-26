@@ -12,7 +12,7 @@
 #error "NODE_ID must be set in platformio.ini build_flags"
 #endif
 #ifndef NEIGHBORS
-#define NEIGHBORS "0"
+#define NEIGHBORS "*"
 #endif
 
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -34,22 +34,36 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
   xQueueSend(rxQueue, &item, 0);  // never block inside the callback
 }
 
-// ---------- duplicate suppression (ring buffer of last 64 msg_ids) ----------
-static uint32_t seenIds[64];
+// ---------- duplicate suppression (ring buffer of the last 64 copies) ----------
+// Keyed on (msg_id, attempt): a retry of a report has the same msg_id but a new
+// attempt number, so relays forward it again instead of dropping it as a duplicate.
+static uint64_t seenKeys[64];
 static uint8_t seenNext = 0;
 
-static bool alreadySeen(uint32_t id) {
-  for (uint32_t s : seenIds)
-    if (s == id) return true;
+static uint64_t seenKey(const Packet &p) {
+  return ((uint64_t)p.msg_id << 8) | p.attempt;
+}
+
+static bool alreadySeen(const Packet &p) {
+  uint64_t key = seenKey(p);
+  for (uint64_t s : seenKeys)
+    if (s == key) return true;
   return false;
 }
 
-static void markSeen(uint32_t id) {
-  seenIds[seenNext] = id;
+static void markSeen(const Packet &p) {
+  seenKeys[seenNext] = seenKey(p);
   seenNext = (seenNext + 1) % 64;
 }
 
+static uint32_t newMsgId() {
+  uint32_t id;
+  do id = esp_random(); while (id == 0);
+  return id;
+}
+
 // ---------- neighbor filter (fakes a topology on one table) ----------
+// NEIGHBORS is a comma list of node IDs ("0" = the gateway) or "*" for anyone.
 static uint8_t neighbors[MAX_PATH];
 static uint8_t neighborCount = 0;
 static bool acceptAll = false;
@@ -57,9 +71,8 @@ static bool acceptAll = false;
 static void parseNeighbors() {
   const char *s = NEIGHBORS;
   while (*s) {
-    int id = atoi(s);
-    if (id == 0) acceptAll = true;
-    else if (neighborCount < MAX_PATH) neighbors[neighborCount++] = id;
+    if (*s == '*') acceptAll = true;
+    else if (neighborCount < MAX_PATH) neighbors[neighborCount++] = atoi(s);
     const char *comma = strchr(s, ',');
     if (!comma) break;
     s = comma + 1;
@@ -78,14 +91,31 @@ static bool isNeighbor(uint8_t id) {
 static bool isValid(Packet &p) {
   if (p.magic != NET0_MAGIC || p.version != NET0_VERSION) return false;
   if (p.msg_id == 0 || p.path_len > MAX_PATH) return false;
-  if (p.type != PKT_REPORT && p.type != PKT_HEARTBEAT) return false;
+  if (p.type != PKT_REPORT && p.type != PKT_HEARTBEAT && p.type != PKT_ACK) return false;
   p.location[LOCATION_LEN - 1] = '\0';  // never trust strings off the air
   p.message[MESSAGE_LEN - 1] = '\0';
   return true;
 }
 
 static const char *typeName(uint8_t type) {
-  return type == PKT_REPORT ? "report" : "heartbeat";
+  if (type == PKT_REPORT) return "report";
+  if (type == PKT_ACK) return "ack";
+  return "heartbeat";
+}
+
+// Build a fresh packet originating at this board.
+static Packet newPacket(uint8_t type) {
+  Packet p = {};
+  p.magic = NET0_MAGIC;
+  p.version = NET0_VERSION;
+  p.type = type;
+  p.msg_id = newMsgId();
+  p.origin = NODE_ID;
+  p.last_hop = NODE_ID;
+  p.ttl = DEFAULT_TTL;
+  p.path[0] = NODE_ID;
+  p.path_len = 1;
+  return p;
 }
 
 // ---------- radio ----------

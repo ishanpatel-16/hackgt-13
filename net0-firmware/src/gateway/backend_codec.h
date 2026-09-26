@@ -9,9 +9,8 @@
 #include <string.h>
 #include "packet.h"
 
-// Must match serial_schema.py / packet_codec.py
-#define BK_PKT_REPORT     1
-#define BK_PKT_HEARTBEAT  3
+// Must match serial_schema.py / packet_codec.py.
+// Packet type numbers are shared with the mesh (PKT_* in packet.h).
 #define BK_MAX_HOPS       8
 #define BK_NAME_MAX       32
 #define BK_PHONE_MAX      20
@@ -48,30 +47,31 @@ struct BkWriter {
   }
 };
 
-// Backend requires user_id >= 1. We don't identify phones yet, so derive
-// one from the msg_id (each report shows up as its own "user").
-static inline uint16_t bkUserId(uint32_t msg_id) {
-  uint16_t id = msg_id & 0xFFFF;
+// Backend requires user_id >= 1. Nodes fill it in (see node/main.cpp); if it's
+// missing (0), fall back to one derived from the msg_id.
+static inline uint16_t bkUserId(const Packet &p) {
+  if (p.user_id) return p.user_id;
+  uint16_t id = p.msg_id & 0xFFFF;
   return id ? id : 1;
 }
 
 // Returns payload length (without the 2-byte frame header).
 static inline size_t bkEncodeReport(const Packet &p, uint8_t *out) {
   BkWriter w{out, 0};
-  w.u8(BK_PKT_REPORT);
+  w.u8(PKT_REPORT);
   w.u32(p.msg_id);
-  w.u8(0);            // attempt
+  w.u8(p.attempt);
   w.u8(p.origin);
   w.path(p);
-  w.u16(bkUserId(p.msg_id));
+  w.u16(bkUserId(p));
   w.u8(0);            // category: unknown
-  w.u8(0);            // severity: unknown
+  w.u8(0);            // severity: unknown (left empty; the dashboard AI decides it later)
   w.u8(0);            // people: unknown
   w.u8(0);            // needs: none
-  w.u8(0);            // has_gps
-  w.f32(0);           // lat
-  w.f32(0);           // lon
-  w.u16(0);           // accuracy_m
+  w.u8(p.has_gps ? 1 : 0);
+  w.f32(p.has_gps ? p.lat : 0);
+  w.f32(p.has_gps ? p.lon : 0);
+  w.u16(p.has_gps ? p.accuracy_m : 0);
   w.str("", BK_NAME_MAX);
   w.str("", BK_PHONE_MAX);
   w.str(p.location, BK_LOCATION_MAX);
@@ -81,7 +81,7 @@ static inline size_t bkEncodeReport(const Packet &p, uint8_t *out) {
 
 static inline size_t bkEncodeHeartbeat(const Packet &p, uint8_t *out) {
   BkWriter w{out, 0};
-  w.u8(BK_PKT_HEARTBEAT);
+  w.u8(PKT_HEARTBEAT);
   w.u8(p.origin);     // node
   w.u8(BK_ROLE_ACCESS);
   w.u8(0);            // clients: not reported yet

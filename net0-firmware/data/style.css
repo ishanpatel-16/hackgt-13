@@ -1,0 +1,58 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 16px;
+  background: #111;
+  color: #eee;
+}
+
+h1 { font-size: 1.4em; margin: 0 0 4px; }
+.sub { color: #aaa; margin: 0 0 16px; }
+
+label { display: block; margin: 12px 0 4px; font-weight: 600; }
+
+input, textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-size: 16px; /* 16px stops iOS from zooming in on focus */
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #222;
+  color: #eee;
+}
+
+textarea { height: 160px; }
+
+.gps { color: #aaa; font-size: 14px; margin-top: 6px; }
+.gps a { color: #8cf; }
+.gps.ok { color: #81c784; }
+
+.count { text-align: right; color: #888; font-size: 13px; margin-top: 4px; }
+
+button {
+  margin-top: 16px;
+  width: 100%;
+  padding: 14px;
+  font-size: 18px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 8px;
+  background: #e53935;
+  color: #fff;
+}
+
+button:disabled { opacity: 0.6; }
+
+.result {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1b3a1b;
+  border: 1px solid #2e7d32;
+}
+
+.result.wait { background: #3a311b; border-color: #f9a825; }
+.result.error { background: #3a1b1b; border-color: #c62828; }
+
+.uid { color: #777; font-size: 13px; margin-top: 24px; }
