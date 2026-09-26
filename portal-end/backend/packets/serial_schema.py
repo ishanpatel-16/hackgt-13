@@ -116,7 +116,7 @@ class Report(_Strict):
     severity: Severity
     people: U8                   # 0 = unknown
     needs: U8                    # bit flags; use decode_needs()
-    gps: Optional[Gps] = None    # always null until HTTPS/GPS is implemented
+    gps: Optional[Gps] = None    # null when the phone sent no fix (HTTP page or location denied)
     name: str = Field("", max_length=NAME_MAX)
     phone: str = Field("", max_length=PHONE_MAX)
     location: str = Field(max_length=LOCATION_MAX)
