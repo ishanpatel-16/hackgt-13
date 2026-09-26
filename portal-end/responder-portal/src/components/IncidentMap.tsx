@@ -31,10 +31,9 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
   const mapRef = useRef<L.Map | null>(null)
   const [popupHost] = useState(() => document.createElement('div'))
   const [mapError, setMapError] = useState(false)
-  const extent = L.latLngBounds([33.75, -84.405], [33.79, -84.365])
 
   useEffect(() => {
-    const map = L.map(host.current!, { center: [33.771, -84.387], zoom: 15, minZoom: 14, maxZoom: 19, maxBounds: [[33.75, -84.405], [33.79, -84.365]], maxBoundsViscosity: 1, zoomControl: false, preferCanvas: true })
+    const map = L.map(host.current!, { center: [33.771, -84.387], zoom: 15, zoomSnap: 0.25, zoomDelta: 0.5, minZoom: 14, maxZoom: 19, bounceAtZoomLimits: false, maxBounds: [[33.75, -84.405], [33.79, -84.365]], maxBoundsViscosity: 1, zoomControl: false, preferCanvas: true })
     mapRef.current = map
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     map.attributionControl.setPrefix(false)
@@ -71,7 +70,18 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
           L.marker([point[1], point[0]], { interactive: false, icon: L.divIcon({ className: 'street-name', html: label, iconSize: [140, 20] }) }).addTo(map)
         })
       }).catch(error => { if (error.name !== 'AbortError') setMapError(true) })
-    const observer = new ResizeObserver(() => map.invalidateSize())
+    // Keep the entire viewport inside the bundled geography. A fixed minimum
+    // zoom exposed blank edges on wide screens and after resizing the window.
+    const coverage = L.latLngBounds([33.75, -84.405], [33.79, -84.365])
+    const updateCoverage = () => {
+      map.invalidateSize({ pan: false })
+      const minimum = map.getBoundsZoom(coverage, true)
+      map.setMinZoom(minimum)
+      if (map.getZoom() < minimum) map.setZoom(minimum, { animate: false })
+      map.panInsideBounds(coverage, { animate: false })
+    }
+    updateCoverage()
+    const observer = new ResizeObserver(updateCoverage)
     observer.observe(host.current!)
     return () => { controller.abort(); observer.disconnect(); map.remove(); mapRef.current = null }
   }, [])
@@ -138,7 +148,7 @@ export default function IncidentMap({ incidents, nodes, selectedId, selectedNode
       <button className="fit-network" onClick={() => mapRef.current?.fitBounds(L.latLngBounds([...Object.values(mockDeviceCoordinates), ...incidents.flatMap(incident => { const point = coordinates(incident); return point ? [point] : [] })]).pad(.15))}>Fit network</button>
       {mapError && <p className="geo-warning">Local map could not load. Emergency markers remain available.</p>}
       {interrupted && <p className="geo-warning">A device on this report’s path is offline. Delivery through another route is not confirmed.</p>}
-      <div className="geo-legend">SOS · A Access Point · ↔ Relay · ⌂ Responder Station<span>Offline area: {extent.getSouth()}–{extent.getNorth()}° N</span></div>
+      <div className="geo-legend">SOS · A Access Point · ↔ Relay · ⌂ Responder Station</div>
       {createPortal(children, popupHost)}
     </section>
   )

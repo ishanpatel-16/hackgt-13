@@ -10,6 +10,8 @@ export interface Incident {
   reported: string
   status: IncidentStatus
   location: string
+  placeName?: string
+  locationDetail?: string
   report: string
   path: string[]
   x: number

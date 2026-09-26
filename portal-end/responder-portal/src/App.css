@@ -277,3 +277,46 @@ blockquote { background: #272a2e; }
 .leaflet-container .leaflet-control-attribution { background: #101010; color: #c6cdd5; }
 .leaflet-control-attribution a { color: #d0e5f8; }
 .network-panel { background: transparent; }
+
+/* Compact, opaque map key for legibility over geographic detail. */
+.workspace .geo-legend {
+  background: #24282e;
+  color: #f5f7fa;
+  border: 1px solid #65717e;
+  border-radius: 8px;
+  padding: 9px 12px;
+  box-shadow: 0 3px 12px #0008;
+  font-size: .75rem;
+  line-height: 1.5;
+  width: fit-content;
+}
+.workspace .geo-legend span {
+  color: #c0cad4;
+  font-size: .65rem;
+  margin-top: 3px;
+}
+
+/* A screen-sized map workspace, with the agent available below the fold. */
+.dashboard { max-width: none; }
+@media (min-width: 801px) {
+  .dashboard-content { padding-top: 16px; }
+  .workspace { --feed-width: clamp(310px, 25vw, 390px); }
+  .workspace > .geographic-panel {
+    height: max(650px, calc(100dvh - 112px));
+    min-height: 650px;
+  }
+  .workspace .geo-canvas { height: 100%; min-height: 0; }
+  .workspace > .queue-panel {
+    width: var(--feed-width);
+    top: 18px;
+    left: 18px;
+    bottom: 72px;
+  }
+  .workspace .geo-title { left: calc(var(--feed-width) + 36px); }
+  .workspace .geo-legend {
+    left: calc(var(--feed-width) + 36px);
+    max-width: calc(100% - var(--feed-width) - 105px);
+  }
+  .workspace .incident-feed { padding: 16px 12px; gap: 14px; }
+  .workspace .incident { padding: 18px 16px; }
+}
