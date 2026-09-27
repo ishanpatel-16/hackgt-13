@@ -22,6 +22,7 @@ interface Props {
   notice?: string | null
   emptyMessage?: string
   agentMode?: boolean
+  agentExpandedUsers?: number[]
   dispatchIds: string[]
   onToggleDispatch: (id: string) => void
 }
@@ -41,10 +42,26 @@ export default function IncidentQueue({
   notice = null,
   emptyMessage = 'No reports match these filters.',
   agentMode = false,
+  agentExpandedUsers = [],
   dispatchIds,
   onToggleDispatch,
 }: Props) {
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
+
+  useEffect(() => {
+    if (!agentExpandedUsers.length) return
+    setExpandedUsers(current => {
+      let changed = false
+      const next = new Set(current)
+      for (const userId of agentExpandedUsers) {
+        if (!next.has(userId)) {
+          next.add(userId)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [agentExpandedUsers])
   const [sort, setSort] = useState<IncidentSort>('arrival')
   const [sortOpen, setSortOpen] = useState(false)
   const [caretY, setCaretY] = useState(48)

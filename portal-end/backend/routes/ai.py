@@ -17,6 +17,7 @@ from schemas.ai import (
 )
 from ai.agent import build_brief, build_plan, ensure_report_ai, send_check_in
 from ai.cluster import load_clusters
+from ai.dispatcher import board_status, next_action
 from ai.llm import gemini_configured
 from schemas.agent import (
     AgentBriefOut,
@@ -24,6 +25,9 @@ from schemas.agent import (
     AgentRunOut,
     CheckInPreviewIn,
     CheckInSendIn,
+    DispatcherActionOut,
+    DispatcherBoardOut,
+    DispatcherNextIn,
 )
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -92,6 +96,21 @@ def get_prompt(name: str):
 def update_prompt(name: str, payload: PromptUpdate):
     prompt_store.save(name, payload.content)
     return PromptOut(name=name, content=payload.content)
+
+
+@router.get("/dispatcher/board", response_model=DispatcherBoardOut)
+def get_dispatcher_board(db: Session = Depends(get_db)):
+    return board_status(db)
+
+
+@router.post("/dispatcher/next", response_model=DispatcherActionOut)
+def post_dispatcher_next(payload: DispatcherNextIn, db: Session = Depends(get_db)):
+    return next_action(
+        db,
+        queued_report_ids=payload.queued_report_ids,
+        suppressed_user_ids=payload.suppressed_user_ids,
+        previous_action=payload.previous_action,
+    )
 
 
 @router.post("/agent/run", response_model=AgentRunOut)

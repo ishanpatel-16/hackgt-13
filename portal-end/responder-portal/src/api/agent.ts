@@ -59,6 +59,38 @@ export function runAgent(reportId?: number): Promise<AgentRunResponse> {
   })
 }
 
+export interface DispatcherAction {
+  thought: string
+  type: 'focus' | 'queue' | 'dispatch' | 'message' | 'open_messages' | 'wait'
+  report_id: number | null
+  report_ids: number[]
+  user_id: number | null
+  text: string | null
+  fingerprint: string
+  gemini_ok: boolean
+}
+
+export interface DispatcherBoard {
+  fingerprint: string
+  unresolved_count: number
+  pending_replies: number
+}
+
+export function dispatcherBoard(): Promise<DispatcherBoard> {
+  return request('/api/ai/dispatcher/board')
+}
+
+export function dispatcherNext(body: {
+  queued_report_ids: number[]
+  suppressed_user_ids: number[]
+  previous_action?: string
+}): Promise<DispatcherAction> {
+  return request('/api/ai/dispatcher/next', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export function sendAgentCheckIn(
   reportId: number,
   text: string,

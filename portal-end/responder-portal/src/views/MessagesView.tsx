@@ -11,6 +11,7 @@ interface Props {
   incidents: Incident[]
   selectedUserId: number | null
   onSelectUser: (userId: number) => void
+  composeText?: string | null
 }
 
 interface NodeGroup {
@@ -49,7 +50,7 @@ function matchesQuery(
   )
 }
 
-export default function MessagesView({ incidents, selectedUserId, onSelectUser }: Props) {
+export default function MessagesView({ incidents, selectedUserId, onSelectUser, composeText = null }: Props) {
   const seeds = useMemo(() => {
     const map = new Map<number, { userName?: string; node: string }>()
     for (const incident of incidents) {
@@ -78,8 +79,14 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
     seeds.map(({ userId, userName }) => ({ userId, userName })),
   )
   const [query, setQuery] = useState('')
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set())
   /** In-memory read set so unread clears immediately on open (localStorage is backup). */
   const [readUserIds, setReadUserIds] = useState<Set<number>>(() => new Set())
+
+  useEffect(() => {
+    if (!query.trim()) return
+    setCollapsedNodes(new Set())
+  }, [query])
 
   useEffect(() => {
     if (selectedUserId == null) return
@@ -140,6 +147,23 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
         }
       : null)
 
+  function toggleGroup(nodeId: string) {
+    setCollapsedNodes(current => {
+      const next = new Set(current)
+      if (next.has(nodeId)) next.delete(nodeId)
+      else next.add(nodeId)
+      return next
+    })
+  }
+
+  function conversationUnread(conversation: ConversationSummary): boolean {
+    return (
+      selectedUserId !== conversation.userId &&
+      !readUserIds.has(conversation.userId) &&
+      isConversationUnread(conversation.lastMessage, conversation.userId)
+    )
+  }
+
   function selectUser(userId: number) {
     const conversation = conversations.find(c => c.userId === userId)
     markConversationRead(userId, conversation?.lastMessage?.created_at)
@@ -168,46 +192,61 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
         {loading && conversations.length === 0 && <p className="chat-muted">Loading…</p>}
         {error && <p className="chat-error">{error}</p>}
         <div className="conversation-list">
-          {nodeGroups.map(group => (
-            <div key={group.nodeId} className="node-group">
-              <div className="node-group-header">
-                <strong>{group.label}</strong>
-                <span className="small-label">
-                  {group.conversations.length}{' '}
-                  {group.conversations.length === 1 ? 'person' : 'people'}
-                </span>
-              </div>
-              {group.conversations.map(conversation => {
-                const name = displayName(conversation.userId, conversation.userName)
-                const snippet = conversation.lastMessage?.text ?? 'No messages yet'
-                const when = conversation.lastMessage
-                  ? relativeTime(conversation.lastMessage.created_at)
-                  : ''
-                const isSelected = selectedUserId === conversation.userId
-                const unread =
-                  !isSelected &&
-                  !readUserIds.has(conversation.userId) &&
-                  isConversationUnread(conversation.lastMessage, conversation.userId)
-                return (
-                  <button
-                    key={conversation.userId}
-                    type="button"
-                    className={`conversation-row ${isSelected ? 'selected' : ''} ${unread ? 'unread' : ''}`}
-                    onClick={() => selectUser(conversation.userId)}
-                  >
-                    <span className="conversation-top">
-                      <span className="conversation-name">
-                        {unread ? <span className="unread-dot" aria-hidden /> : <span className="unread-dot-spacer" aria-hidden />}
-                        <strong>{name}</strong>
-                      </span>
-                      <span className="small-label">{when}</span>
+          {nodeGroups.map(group => {
+            const expanded = !collapsedNodes.has(group.nodeId)
+            const groupUnread = group.conversations.some(conversationUnread)
+            return (
+              <div key={group.nodeId} className={`node-group ${expanded ? 'open' : ''}`}>
+                <button
+                  type="button"
+                  className="node-group-header"
+                  aria-expanded={expanded}
+                  aria-label={`${expanded ? 'Collapse' : 'Expand'} ${group.label}${groupUnread ? ', unread messages' : ''}`}
+                  onClick={() => toggleGroup(group.nodeId)}
+                >
+                  <span className="node-group-title">
+                    <span className={`node-chevron ${expanded ? 'open' : ''}`} aria-hidden>
+                      <ChevronIcon />
                     </span>
-                    <span className="conversation-snippet">{snippet}</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+                    <strong>{group.label}</strong>
+                    {groupUnread && <span className="unread-dot" aria-hidden />}
+                  </span>
+                  <span className="small-label">
+                    {group.conversations.length}{' '}
+                    {group.conversations.length === 1 ? 'person' : 'people'}
+                  </span>
+                </button>
+                {expanded &&
+                  group.conversations.map(conversation => {
+                    const name = displayName(conversation.userId, conversation.userName)
+                    const snippet = conversation.lastMessage?.text ?? 'No messages yet'
+                    const when = conversation.lastMessage
+                      ? relativeTime(conversation.lastMessage.created_at)
+                      : ''
+                    const isSelected = selectedUserId === conversation.userId
+                    const unread = conversationUnread(conversation)
+                    return (
+                      <button
+                        key={conversation.userId}
+                        type="button"
+                        className={`conversation-row ${isSelected ? 'selected' : ''} ${unread ? 'unread' : ''}`}
+                        data-conversation-user={conversation.userId}
+                        onClick={() => selectUser(conversation.userId)}
+                      >
+                        <span className="conversation-top">
+                          <span className="conversation-name">
+                            {unread ? <span className="unread-dot" aria-hidden /> : <span className="unread-dot-spacer" aria-hidden />}
+                            <strong>{name}</strong>
+                          </span>
+                          <span className="small-label">{when}</span>
+                        </span>
+                        <span className="conversation-snippet">{snippet}</span>
+                      </button>
+                    )
+                  })}
+              </div>
+            )
+          })}
           {!loading && nodeGroups.length === 0 && (
             <p className="chat-muted">
               {query.trim() ? 'No nodes or users match that search.' : 'No connected users yet.'}
@@ -229,7 +268,7 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
                 </span>
               </div>
             </div>
-            <ChatThread userId={active.userId} active />
+            <ChatThread userId={active.userId} active composeText={composeText} />
           </>
         ) : (
           <div className="messages-empty">
@@ -238,6 +277,14 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser }
         )}
       </div>
     </section>
+  )
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path d="M4.25 2.5 7.75 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }
 

@@ -27,8 +27,6 @@ interface Props {
   highlightedDispatchId?: string | null
   /** Bump `token` to fly the map to this dispatch stop again. */
   dispatchFocus?: { id: string; token: number } | null
-  /** Bump to fit every incident back into the open map. */
-  overviewToken?: number
   /** Cumulative street-route arrival minutes for the current dispatch stops. */
   onDispatchEtas?: (etas: Record<string, number>) => void
 }
@@ -472,8 +470,8 @@ function applyHeatBuckets(
   signatureRef.current = signature
 }
 
-/** Same cap as the backend: a cluster may not span more than about one block. */
-const MAX_CLUSTER_DIAMETER_M = 150
+/** Same cap as the backend: one event area, not a chain across the city. */
+const MAX_CLUSTER_DIAMETER_M = 500
 
 function splitTightIncidents(incidents: Incident[]): Incident[][] {
   const placed = incidents.flatMap(incident => {
@@ -579,13 +577,15 @@ function clusterPriorityLabel(priority: number | null): string {
   return `High priority P${priority}`
 }
 
+function clusterSummaryText(cluster: IncidentCluster): string {
+  const summary = cluster.incidents.find(incident => incident.clusterSummary)?.clusterSummary?.trim()
+  return summary || 'Cluster summary pending.'
+}
+
 function clusterPopup(cluster: IncidentCluster): string {
   const people = cluster.incidents.reduce((sum, incident) => sum + incident.people, 0)
   const maxPriority = clusterMaxPriority(cluster)
-  const summary =
-    cluster.incidents.find(incident => incident.clusterSummary)?.clusterSummary
-    || cluster.incidents.find(incident => incident.aiSummary)?.aiSummary
-    || 'Nearby reports share this area.'
+  const summary = clusterSummaryText(cluster)
   const responders = clusterRespondersFromIncidents(cluster.incidents)
   return `<div class="cluster-popup-content">
     <span class="cluster-popup-kicker">${cluster.incidents.length} linked reports</span>
@@ -597,10 +597,7 @@ function clusterPopup(cluster: IncidentCluster): string {
 
 function clusterSignature(cluster: IncidentCluster): string {
   const responders = clusterRespondersFromIncidents(cluster.incidents).join(',')
-  const summary =
-    cluster.incidents.find(incident => incident.clusterSummary)?.clusterSummary
-    || cluster.incidents.find(incident => incident.aiSummary)?.aiSummary
-    || ''
+  const summary = clusterSummaryText(cluster)
   const people = cluster.incidents.reduce((sum, incident) => sum + incident.people, 0)
   const priorities = cluster.incidents.map(incident => incident.priority ?? 0).join(',')
   return [
@@ -765,7 +762,7 @@ function flyPinIntoView(
   map: L.Map,
   latlng: L.LatLngExpression,
   animate: boolean,
-  options?: { zoom?: number; topPad?: number; allowZoomOut?: boolean },
+  options?: { zoom?: number; topPad?: number; allowZoomOut?: boolean; duration?: number },
 ) {
   const requested = options?.zoom ?? PIN_FOCUS_ZOOM
   const zoom = options?.allowZoomOut ? requested : Math.max(map.getZoom(), requested)
@@ -782,7 +779,11 @@ function flyPinIntoView(
   )
   const center = map.unproject(centerPoint, zoom)
   if (animate) {
-    map.flyTo(center, zoom, { animate: true, duration: 0.35, easeLinearity: 0.35 })
+    map.flyTo(center, zoom, {
+      animate: true,
+      duration: options?.duration ?? 0.35,
+      easeLinearity: 0.25,
+    })
   } else {
     map.setView(center, zoom, { animate: false })
   }
@@ -850,7 +851,6 @@ export default function IncidentMap({
   dispatchOrder = [],
   highlightedDispatchId = null,
   dispatchFocus = null,
-  overviewToken = 0,
   onDispatchEtas,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -889,6 +889,10 @@ export default function IncidentMap({
   const syncMapChromeRef = useRef<(map: L.Map, opts?: { syncHeat?: boolean }) => void>(() => {})
   const onDispatchEtasRef = useRef(onDispatchEtas)
   onDispatchEtasRef.current = onDispatchEtas
+  const seenDispatchStopIdsRef = useRef<Set<string>>(new Set())
+  const pendingRouteFitRef = useRef(false)
+  const awaitingRouteFitRef = useRef(false)
+  const routeFitFrameRef = useRef(0)
 
   selectRef.current = onSelectIncident
   clearSelectRef.current = onClearSelection
@@ -1282,6 +1286,7 @@ export default function IncidentMap({
           existing.marker.setLatLng(point)
         }
         existing.button.className = markerClasses(incident, selectedRef.current)
+        existing.button.dataset.mapPin = incident.id
         existing.button.innerHTML = emergencyIconHtml(incident.type)
         existing.button.title = markerTitle(incident)
         existing.button.setAttribute('aria-label', existing.button.title)
@@ -1304,6 +1309,7 @@ export default function IncidentMap({
       const button = document.createElement('button')
       button.type = 'button'
       button.className = markerClasses(incident, selectedRef.current)
+      button.dataset.mapPin = incident.id
       button.innerHTML = emergencyIconHtml(incident.type)
       button.title = markerTitle(incident)
       button.setAttribute('aria-label', button.title)
@@ -1395,38 +1401,67 @@ export default function IncidentMap({
   useEffect(() => {
     const layer = routeLayerRef.current
     if (!layer) return
+    const stopIds = dispatchStops.map(stop => stop.id)
+    const seen = seenDispatchStopIdsRef.current
+    const membershipChanged = seen.size !== stopIds.length || stopIds.some(id => !seen.has(id))
+    if (membershipChanged) pendingRouteFitRef.current = true
+    seenDispatchStopIdsRef.current = new Set(stopIds)
+
     const signature = [
       streetGraph ? 'map' : 'wait',
       devicePosition ? `${devicePosition[0].toFixed(4)},${devicePosition[1].toFixed(4)}` : '',
       dispatchStops.map(stop => `${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}`).join('|'),
     ].join('~')
-    if (signature === routeSignatureRef.current) return
-    routeSignatureRef.current = signature
-    layer.clearLayers()
-    if (!streetGraph || !devicePosition || dispatchStops.length === 0) {
-      onDispatchEtasRef.current?.({})
-      return
+    let routeReady = false
+    if (signature !== routeSignatureRef.current) {
+      routeSignatureRef.current = signature
+      layer.clearLayers()
+      if (!streetGraph || !devicePosition || dispatchStops.length === 0) {
+        onDispatchEtasRef.current?.({})
+      } else {
+        const { path, minutesById } = routeDispatch(streetGraph, devicePosition, dispatchStops)
+        onDispatchEtasRef.current?.(minutesById)
+        if (path.length >= 2) {
+          routeReady = true
+          L.polyline(path, {
+            color: '#8de0af',
+            weight: 6,
+            opacity: 0.2,
+            lineCap: 'round',
+            lineJoin: 'round',
+            interactive: false,
+          }).addTo(layer)
+          L.polyline(path, {
+            color: '#b8f2c5',
+            weight: 2.5,
+            opacity: 0.95,
+            dashArray: '8 9',
+            lineCap: 'round',
+            lineJoin: 'round',
+            interactive: false,
+          }).addTo(layer)
+        }
+      }
+    } else if (layer.getLayers().length > 0) {
+      routeReady = true
     }
-    const { path, minutesById } = routeDispatch(streetGraph, devicePosition, dispatchStops)
-    onDispatchEtasRef.current?.(minutesById)
-    if (path.length < 2) return
-    L.polyline(path, {
-      color: '#8de0af',
-      weight: 6,
-      opacity: 0.2,
-      lineCap: 'round',
-      lineJoin: 'round',
-      interactive: false,
-    }).addTo(layer)
-    L.polyline(path, {
-      color: '#b8f2c5',
-      weight: 2.5,
-      opacity: 0.95,
-      dashArray: '8 9',
-      lineCap: 'round',
-      lineJoin: 'round',
-      interactive: false,
-    }).addTo(layer)
+
+    if (routeReady && awaitingRouteFitRef.current) pendingRouteFitRef.current = true
+    if (!pendingRouteFitRef.current) return
+    // One camera move per queue change. Wait until the street graph can draw the
+    // path so the fly is not followed by a second correction.
+    if (dispatchStops.length > 0 && !routeReady && !streetGraph) return
+
+    pendingRouteFitRef.current = false
+    awaitingRouteFitRef.current = dispatchStops.length > 0 && !routeReady
+    suppressRestoreRef.current = true
+    window.cancelAnimationFrame(routeFitFrameRef.current)
+    routeFitFrameRef.current = window.requestAnimationFrame(() => {
+      settleDispatchView()
+      window.requestAnimationFrame(() => {
+        suppressRestoreRef.current = false
+      })
+    })
   }, [devicePosition, dispatchStops, streetGraph])
 
   // Smooth pan when the selected report changes (not when only status updates).
@@ -1510,24 +1545,103 @@ export default function IncidentMap({
     return points
   }
 
+  function dispatchViewPadding(map: L.Map): { left: number; right: number; top: number; bottom: number } {
+    const { left, right } = focusInsets(map)
+    return { left, right, top: 56, bottom: 56 }
+  }
+
+  /** Pixel size of `bounds` if the map were at `zoom`. */
+  function boundsPixelSize(map: L.Map, bounds: L.LatLngBounds, zoom: number) {
+    const southWest = map.project(bounds.getSouthWest(), zoom)
+    const northEast = map.project(bounds.getNorthEast(), zoom)
+    return {
+      width: Math.abs(northEast.x - southWest.x),
+      height: Math.abs(northEast.y - southWest.y),
+    }
+  }
+
+  /** Center that puts the bounds in the middle of the map area the panels do not cover. */
+  function centerForBounds(
+    map: L.Map,
+    bounds: L.LatLngBounds,
+    zoom: number,
+    padding: { left: number; right: number; top: number; bottom: number },
+  ) {
+    const size = map.getSize()
+    const southWest = map.project(bounds.getSouthWest(), zoom)
+    const northEast = map.project(bounds.getNorthEast(), zoom)
+    const midX = (southWest.x + northEast.x) / 2
+    const midY = (southWest.y + northEast.y) / 2
+    const freeX = padding.left + (size.x - padding.left - padding.right) / 2
+    const freeY = padding.top + (size.y - padding.top - padding.bottom) / 2
+    return map.unproject(L.point(midX + size.x / 2 - freeX, midY + size.y / 2 - freeY), zoom)
+  }
+
+  function flyMapToPoints(
+    points: L.LatLngTuple[],
+    padding: { left: number; right: number; top: number; bottom: number },
+    maxZoom: number,
+  ) {
+    const map = mapRef.current
+    if (!map || !points.length) return
+    const bounds = L.latLngBounds(points)
+    if (!bounds.isValid()) return
+    const framed = points.length === 1 ? bounds.pad(0.004) : bounds.pad(0.08)
+    const options = {
+      paddingTopLeft: [padding.left, padding.top] as [number, number],
+      paddingBottomRight: [padding.right, padding.bottom] as [number, number],
+      maxZoom,
+    }
+    const fit = (map as L.Map & {
+      _getBoundsCenterZoom: (b: L.LatLngBounds, o: typeof options) => { zoom: number; center: L.LatLng }
+    })._getBoundsCenterZoom(framed, options)
+    const current = map.getZoom()
+    const size = map.getSize()
+    const needed = boundsPixelSize(map, bounds, current)
+    const roomX = size.x - padding.left - padding.right - 48
+    const roomY = size.y - padding.top - padding.bottom - 48
+    const alreadyInView = needed.width <= roomX && needed.height <= roomY
+    // Zoom out only when the route does not fit. If it already fits, stay put
+    // unless it is a small patch in a wide view, which should come closer.
+    let zoom = current
+    if (!alreadyInView) zoom = fit.zoom
+    else if (fit.zoom > current + 0.5) zoom = Math.min(fit.zoom, maxZoom)
+    const center = centerForBounds(map, bounds, zoom, padding)
+    const zoomDelta = Math.abs(zoom - current)
+    const pixelDelta = map.project(map.getCenter(), zoom).distanceTo(map.project(center, zoom))
+    if (zoomDelta < 0.2 && pixelDelta < 28) return
+    map.flyTo(center, zoom, { duration: 1.05, easeLinearity: 0.2 })
+  }
+
   function fitDispatchRoute() {
+    const map = mapRef.current
     const points = [
       ...routeCoordinates(),
       ...dispatchStopsRef.current.map(stop => [stop.lat, stop.lon] as L.LatLngTuple),
     ]
     const device = devicePositionRef.current
     if (device) points.push(device)
-    fitCoordinates(points)
+    if (!map || !points.length) return
+    flyMapToPoints(points, dispatchViewPadding(map), 17)
   }
 
-  useEffect(() => {
-    if (!overviewToken) return
-    const frame = window.requestAnimationFrame(() => {
-      if (dispatchStopsRef.current.length) fitDispatchRoute()
-      else fitIncidents()
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [overviewToken])
+  function settleDispatchView() {
+    const map = mapRef.current
+    if (!map) return
+    if (dispatchStopsRef.current.length) {
+      fitDispatchRoute()
+      return
+    }
+    const { left, right } = focusInsets(map)
+    flyMapToPoints(
+      incidents.flatMap(incident => {
+        const point = coordinates(incident)
+        return point ? [point] : []
+      }),
+      { left, right, top: 56, bottom: 64 },
+      16,
+    )
+  }
 
   return (
     <section className="panel map-panel geographic-panel" aria-label="Incident map">

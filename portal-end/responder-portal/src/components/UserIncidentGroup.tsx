@@ -34,7 +34,7 @@ export default function UserIncidentGroupRow({
   const age = groupAgeLabel(group, now)
 
   return (
-    <div className={`user-group ${expanded ? 'open' : ''} ${messaging ? 'messaging' : ''}`}>
+    <div className={`user-group ${expanded ? 'open' : ''} ${messaging ? 'messaging' : ''}`} data-user-id={group.userId}>
       <div className="user-row">
         <button type="button" className="user-row-main" onClick={onToggle} aria-expanded={expanded}>
           <span className={`user-chevron ${expanded ? 'open' : ''}`} aria-hidden>
@@ -60,6 +60,7 @@ export default function UserIncidentGroupRow({
         <button
           type="button"
           className={`user-message-btn ${messaging ? 'active' : ''}`}
+          data-message-user={group.userId}
           aria-label={`Message ${name}`}
           title="Message"
           onClick={event => {

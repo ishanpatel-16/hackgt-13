@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from './components/Header'
 import IncidentQueue from './components/IncidentQueue'
 import IncidentMap from './components/IncidentMap'
 import NavRail, { type AppView } from './components/NavRail'
 import MessagesView from './views/MessagesView'
 import AgentModeDock from './components/AgentModeDock'
+import AgentCursor from './components/AgentCursor'
 import DispatchDock from './components/DispatchDock'
 import { useLivePortal } from './hooks/useLivePortal'
 import { useDeviceLocation } from './hooks/useDeviceLocation'
+import { useDispatcherAgent } from './hooks/useDispatcherAgent'
 import type { AiResponder, Incident } from './types/incident'
-import type { AgentBrief, RescuePlan } from './types/agent'
 import { filterByResponders } from './utils/groupIncidents'
 import { sendMessage } from './api/messages'
 import { dispatchCode } from './utils/dispatchOrder'
 import { formatArrival, orderByLocation } from './utils/streetRoute'
-import { runAgent, sendAgentCheckIn, type AgentApiBrief, type AgentApiPlan } from './api/agent'
 import './App.css'
 
 function App() {
@@ -25,15 +25,12 @@ function App() {
   const [peekUserId, setPeekUserId] = useState<number | null>(null)
   const [messagesUserId, setMessagesUserId] = useState<number | null>(null)
   const [agentMode, setAgentMode] = useState(false)
-  const [agentPlan, setAgentPlan] = useState<RescuePlan | null>(null)
-  const [agentBrief, setAgentBrief] = useState<AgentBrief | null>(null)
-  const [agentLoading, setAgentLoading] = useState(false)
-  const [agentStatus, setAgentStatus] = useState<'ok' | 'fallback' | null>(null)
+  const [agentExpandedUsers, setAgentExpandedUsers] = useState<number[]>([])
+  const [agentCompose, setAgentCompose] = useState<string | null>(null)
   const [dispatchIds, setDispatchIds] = useState<string[]>([])
   const [orderNumber, setOrderNumber] = useState(1)
   const [highlightedDispatchId, setHighlightedDispatchId] = useState<string | null>(null)
   const [dispatchFocus, setDispatchFocus] = useState<{ id: string; token: number } | null>(null)
-  const [overviewToken, setOverviewToken] = useState(0)
   const [dispatchEtas, setDispatchEtas] = useState<Record<string, number>>({})
   const [dispatchNotice, setDispatchNotice] = useState<string | null>(null)
   const devicePosition = useDeviceLocation()
@@ -74,6 +71,15 @@ function App() {
     [dispatchIncidents],
   )
 
+  const dispatchIdsRef = useRef(dispatchIds)
+  const dispatchIncidentsRef = useRef(dispatchIncidents)
+  const incidentsRef = useRef(incidents)
+  dispatchIncidentsRef.current = dispatchIncidents
+  incidentsRef.current = incidents
+  useEffect(() => {
+    dispatchIdsRef.current = dispatchIds
+  }, [dispatchIds])
+
   useEffect(() => {
     if (!incidents.length) return
     const live = new Set(incidents.map(incident => incident.id))
@@ -88,31 +94,6 @@ function App() {
     const timer = window.setTimeout(() => setDispatchNotice(null), 6000)
     return () => window.clearTimeout(timer)
   }, [dispatchNotice])
-
-  useEffect(() => {
-    if (!agentMode) return
-    let cancelled = false
-    async function refreshAgent() {
-      setAgentLoading(true)
-      try {
-        const result = await runAgent(selectedId ? Number(selectedId) : undefined)
-        if (cancelled) return
-        setAgentPlan(result.plan ? toRescuePlan(result.plan) : null)
-        setAgentBrief(toAgentBrief(result.brief))
-        setAgentStatus(result.status)
-      } catch {
-        if (!cancelled) setAgentStatus(null)
-      } finally {
-        if (!cancelled) setAgentLoading(false)
-      }
-    }
-    void refreshAgent()
-    const timer = window.setInterval(refreshAgent, 30000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [agentMode, selectedId])
 
   function selectIncident(id: string) {
     setSelectedId(id)
@@ -154,7 +135,6 @@ function App() {
     if (dispatchFocus?.id !== id) return
     setDispatchFocus(null)
     setHighlightedDispatchId(current => (current === id ? null : current))
-    setOverviewToken(token => token + 1)
   }
 
   function toggleDispatch(id: string) {
@@ -175,24 +155,32 @@ function App() {
     setDispatchFocus(current => ({ id, token: (current?.token ?? 0) + 1 }))
   }
 
-  function sendDispatch() {
-    const queued = dispatchIncidents
-    if (!queued.length) return
+  async function sendDispatch(): Promise<number[]> {
+    const queued = dispatchIncidentsRef.current
+    if (!queued.length) return []
     const etas = dispatchEtas
     const code = dispatchCode(orderNumber)
     const ids = queued.map(incident => incident.id)
+    dispatchIdsRef.current = []
     setDispatchIds([])
     setDispatchEtas({})
     setHighlightedDispatchId(null)
     setOrderNumber(number => number + 1)
     if (selectedId && ids.includes(selectedId)) setSelectedId(null)
-    void notifyDispatch(queued, etas, code)
-    void resolveReports(ids)
+    const notified = await notifyDispatch(queued, etas, code)
+    await resolveReports(ids)
+    return notified
   }
 
-  async function notifyDispatch(queued: Incident[], etas: Record<string, number>, code: string) {
+  async function notifyDispatch(queued: Incident[], etas: Record<string, number>, code: string): Promise<number[]> {
+    const seen = new Set<number>()
+    const unique = queued.filter(incident => {
+      if (seen.has(incident.userId)) return false
+      seen.add(incident.userId)
+      return true
+    })
     const results = await Promise.all(
-      queued.map(async incident => {
+      unique.map(async incident => {
         const minutes = etas[incident.id]
         const arrival =
           minutes != null
@@ -218,18 +206,73 @@ function App() {
         ? `Dispatch sent. ${failed} ${failed === 1 ? 'notification failed' : 'notifications failed'}.`
         : 'Dispatch sent. Each person was told help is on the way.',
     )
+    return unique.map(incident => incident.userId)
   }
 
-  function toggleAgentMode() {
-    setAgentMode(current => {
-      const next = !current
-      if (next && selectedId == null && openIncidents.length > 0) {
-        const highestPriority = [...openIncidents].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]
-        setSelectedId(highestPriority.id)
-      }
-      return next
+  function expandAgentUser(userId: number) {
+    setAgentExpandedUsers(current => (current.includes(userId) ? current : [...current, userId]))
+  }
+
+  async function sendAgentText(userId: number, text: string) {
+    const incident = incidentsRef.current.find(item => item.userId === userId && item.status !== 'RESOLVED')
+    await sendMessage({
+      user_id: userId,
+      text,
+      sender: 'Net0 Agent',
+      reply_to: incident?.msgId,
     })
   }
+
+  const { thought: agentThought, cursor: agentCursor } = useDispatcherAgent({
+    enabled: agentMode,
+    dispatchIdsRef,
+    setDispatchIds,
+    incidentsRef,
+    selectIncident,
+    runDispatch: sendDispatch,
+    openThread: openMessages,
+    showHome: () => setView('home'),
+    sendText: sendAgentText,
+    expandUser: expandAgentUser,
+    setCompose: setAgentCompose,
+  })
+
+  function toggleAgentMode() {
+    setAgentMode(current => !current)
+  }
+
+  useEffect(() => {
+    if (!agentMode) return
+    const previousOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+
+    const allowToggle = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest('.agent-dock-toggle'))
+
+    const blockPointer = (event: Event) => {
+      if (allowToggle(event.target)) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const blockKeys = (event: KeyboardEvent) => {
+      if (allowToggle(event.target)) return
+      const scrolling = [' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End']
+      if (scrolling.includes(event.key) || event.key === 'Tab') {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    }
+
+    window.addEventListener('wheel', blockPointer, { capture: true, passive: false })
+    window.addEventListener('touchmove', blockPointer, { capture: true, passive: false })
+    window.addEventListener('keydown', blockKeys, true)
+    return () => {
+      document.documentElement.style.overflow = previousOverflow
+      window.removeEventListener('wheel', blockPointer, true)
+      window.removeEventListener('touchmove', blockPointer, true)
+      window.removeEventListener('keydown', blockKeys, true)
+    }
+  }, [agentMode])
 
   const emptyMessage =
     openIncidents.length > 0
@@ -241,7 +284,8 @@ function App() {
           : 'No reports yet. New emergencies will appear here.'
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${agentMode ? 'agent-watching' : ''}`}>
+      <div className="agent-stage" inert={agentMode ? true : undefined}>
       <NavRail view={view} onChange={changeView} />
       <div className="dashboard">
         <Header nodes={nodes} link={link} />
@@ -265,6 +309,7 @@ function App() {
                 notice={dispatchNotice ?? (error && openIncidents.length > 0 ? error : null)}
                 emptyMessage={emptyMessage}
                 agentMode={agentMode}
+                agentExpandedUsers={agentExpandedUsers}
                 dispatchIds={dispatchIds}
                 onToggleDispatch={toggleDispatch}
               />
@@ -278,7 +323,6 @@ function App() {
                 dispatchOrder={dispatchIncidents.map(incident => incident.id)}
                 highlightedDispatchId={highlightedDispatchId}
                 dispatchFocus={dispatchFocus}
-                overviewToken={overviewToken}
                 onDispatchEtas={setDispatchEtas}
               />
             </div>
@@ -287,28 +331,16 @@ function App() {
               incidents={openIncidents}
               selectedUserId={messagesUserId}
               onSelectUser={setMessagesUserId}
+              composeText={agentCompose}
             />
           )}
         </main>
       </div>
+      </div>
+      <AgentCursor point={agentCursor} />
       <div className="corner-stack">
-        <AgentModeDock
-          active={agentMode}
-          incidents={openIncidents}
-          selectedId={selectedId}
-          nodes={nodes}
-          plan={agentPlan}
-          brief={agentBrief}
-          loading={agentLoading}
-          runStatus={agentStatus}
-          onToggle={toggleAgentMode}
-          onApproveCheckIn={async (reportId, text) => {
-            const result = await sendAgentCheckIn(reportId, text)
-            const targetIncident = incidents.find(incident => incident.id === String(reportId))
-            if (targetIncident) setMessagesUserId(targetIncident.userId)
-            return result.status
-          }}
-        />
+        {agentMode ? <div className="agent-lock" aria-hidden /> : null}
+        <AgentModeDock active={agentMode} thought={agentThought} onToggle={toggleAgentMode} />
         {dispatchIncidents.length > 0 ? (
           <DispatchDock
             orderNumber={orderNumber}
@@ -331,34 +363,3 @@ function hasFix(incident: Incident): incident is Incident & { lat: number; lon: 
 }
 
 export default App
-
-function toRescuePlan(plan: AgentApiPlan): RescuePlan {
-  return {
-    reportId: plan.report_id,
-    priority: plan.priority,
-    title: plan.title,
-    summary: plan.summary,
-    approach: plan.approach,
-    avoid: plan.avoid,
-    confidence: plan.confidence,
-    evidence: plan.evidence,
-    unknowns: plan.unknowns,
-    draft: plan.draft,
-    route: plan.route ?? [],
-    routeLabel: plan.route_label ?? 'Preferred corridor',
-    routeNote: plan.route_note ?? 'Verify blocked access and hazards before entry.',
-  }
-}
-
-function toAgentBrief(brief: AgentApiBrief): AgentBrief {
-  return {
-    reportCount: brief.report_count,
-    incidentCount: brief.incident_count,
-    insight: brief.insight,
-    highlights: brief.highlights,
-    summary: brief.summary,
-    signals: brief.signals,
-    verify: brief.verify,
-    generatedAt: brief.generated_at,
-  }
-}
