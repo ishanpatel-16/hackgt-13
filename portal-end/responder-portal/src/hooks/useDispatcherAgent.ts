@@ -149,7 +149,8 @@ export function useDispatcherAgent(options: Options): {
       if (action.type === 'focus' && action.report_id != null) {
         const id = String(action.report_id)
         const incident = api.incidentsRef.current.find(item => item.id === id)
-        api.showHome()
+        await showBoard(api)
+        if (cancelled) return
         if (incident) api.expandUser(incident.userId)
         await sleep(80)
         if (cancelled) return
@@ -162,7 +163,8 @@ export function useDispatcherAgent(options: Options): {
 
       if (action.type === 'queue') {
         const ids = action.report_ids.map(String)
-        api.showHome()
+        await showBoard(api)
+        if (cancelled) return
         for (const id of ids) {
           const incident = api.incidentsRef.current.find(item => item.id === id)
           if (incident) api.expandUser(incident.userId)
@@ -182,7 +184,7 @@ export function useDispatcherAgent(options: Options): {
       }
 
       if (action.type === 'dispatch') {
-        api.showHome()
+        await showBoard(api)
         await sleep(80)
         if (cancelled) return
         await moveTo('.dispatch-send', setCursor)
@@ -193,28 +195,47 @@ export function useDispatcherAgent(options: Options): {
       }
 
       if (action.type === 'open_messages' && action.user_id != null) {
-        api.openThread(action.user_id)
-        await sleep(240)
-        if (cancelled) return
-        await moveTo(`[data-conversation-user="${action.user_id}"]`, setCursor)
+        await openInbox(action.user_id, api)
         return
       }
 
       if (action.type === 'message' && action.user_id != null && action.text) {
-        if (suppressed.has(action.user_id)) return
-        api.openThread(action.user_id)
+        await openInbox(action.user_id, api)
+        if (cancelled) return
         api.setCompose(null)
-        await sleep(240)
+        await sleep(80)
         if (cancelled) return
         await moveTo('[data-chat-input]', setCursor)
         if (cancelled) return
         api.setCompose(action.text)
-        await sleep(Math.min(1100, 280 + action.text.length * 12))
+        await sleep(Math.max(900, Math.min(1400, 280 + action.text.length * 12)))
         if (cancelled) return
         await moveTo('.chat-composer button[type="submit"]', setCursor)
         if (cancelled) return
         await api.sendText(action.user_id, action.text)
         api.setCompose(null)
+      }
+    }
+
+    async function showBoard(api: Options): Promise<void> {
+      if (!document.querySelector('.messages-mode')) {
+        api.showHome()
+        return
+      }
+      await moveTo('[data-nav="home"]', setCursor)
+      if (cancelled) return
+      api.showHome()
+      await sleep(280)
+    }
+
+    async function openInbox(userId: number, api: Options): Promise<void> {
+      await moveTo('[data-nav="messages"]', setCursor)
+      if (cancelled) return
+      api.openThread(userId)
+      await sleep(360)
+      if (cancelled) return
+      if (document.querySelector(`[data-conversation-user="${userId}"]`)) {
+        await moveTo(`[data-conversation-user="${userId}"]`, setCursor)
       }
     }
 
@@ -258,12 +279,6 @@ export function useDispatcherAgent(options: Options): {
           ) {
             nextAction = { ...action, type: 'dispatch' }
           }
-          if (action.type === 'message' && action.user_id != null && suppressed.has(action.user_id)) {
-            setThought('Dispatch already texted them.')
-            pausedFingerprint.current = action.fingerprint
-            return
-          }
-
           if (nextAction.type === 'wait') {
             setThought(nextAction.thought || 'Waiting for the next report.')
             pausedFingerprint.current = nextAction.fingerprint

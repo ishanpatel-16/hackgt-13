@@ -8,11 +8,13 @@ import AgentModeDock from './components/AgentModeDock'
 import AgentCursor from './components/AgentCursor'
 import DispatchDock from './components/DispatchDock'
 import { useLivePortal } from './hooks/useLivePortal'
+import { useInbox } from './hooks/useInbox'
 import { useDeviceLocation } from './hooks/useDeviceLocation'
 import { useDispatcherAgent } from './hooks/useDispatcherAgent'
 import type { AiResponder, Incident } from './types/incident'
 import { filterByResponders } from './utils/groupIncidents'
 import { sendMessage } from './api/messages'
+import { latestMessageId, markConversationRead, totalUnread, unreadCountsByUser } from './utils/messageRead'
 import { dispatchCode } from './utils/dispatchOrder'
 import { formatArrival, orderByLocation } from './utils/streetRoute'
 import './App.css'
@@ -52,6 +54,31 @@ function App() {
     }
     return map
   }, [openIncidents])
+
+  const inboxSeeds = useMemo(
+    () => [...seedUsers.entries()].map(([userId, userName]) => ({ userId, userName })),
+    [seedUsers],
+  )
+  const {
+    conversations,
+    messages: inboxMessages,
+    loading: inboxLoading,
+    error: inboxError,
+  } = useInbox(true, inboxSeeds)
+  const viewingUserId = view === 'messages' ? messagesUserId : null
+  const [readEpoch, setReadEpoch] = useState(0)
+
+  useEffect(() => {
+    if (viewingUserId == null) return
+    const advanced = markConversationRead(viewingUserId, latestMessageId(inboxMessages, viewingUserId))
+    if (advanced) setReadEpoch(epoch => epoch + 1)
+  }, [viewingUserId, inboxMessages])
+
+  const unreadByUser = useMemo(
+    () => unreadCountsByUser(inboxMessages, viewingUserId),
+    [inboxMessages, viewingUserId, readEpoch],
+  )
+  const unreadTotal = totalUnread(unreadByUser)
 
   const dispatchIncidents = useMemo(() => {
     const chosen = dispatchIds.flatMap(id => {
@@ -286,7 +313,7 @@ function App() {
   return (
     <div className={`app-shell ${agentMode ? 'agent-watching' : ''}`}>
       <div className="agent-stage" inert={agentMode ? true : undefined}>
-      <NavRail view={view} onChange={changeView} />
+      <NavRail view={view} unreadCount={unreadTotal} onChange={changeView} />
       <div className="dashboard">
         <Header nodes={nodes} link={link} />
         <main className={`dashboard-content ${view === 'messages' ? 'messages-mode' : ''}`}>
@@ -329,6 +356,10 @@ function App() {
           ) : (
             <MessagesView
               incidents={openIncidents}
+              conversations={conversations}
+              loading={inboxLoading}
+              error={inboxError}
+              unreadByUser={unreadByUser}
               selectedUserId={messagesUserId}
               onSelectUser={setMessagesUserId}
               composeText={agentCompose}

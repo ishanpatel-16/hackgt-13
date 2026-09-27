@@ -13,8 +13,8 @@ Include only the fields that type needs:
 
 Rules:
 - Use only the ids below. Never invent reports, locations, or casualties.
+- Unanswered texts are handled before this step. Do not message anyone from here.
 - dispatch already texts each person that help is on the way. Never message a user in already_notified.
-- message is only a reply to an inbound text, not a second "help is coming" note.
 - The next run is already chosen for you: highest priority first, one help type, nearby stops only.
 - If that run is not already the whole queue, queue exactly those ids. Do not add other help types or far stops.
 - If the queue is already exactly that run, dispatch.

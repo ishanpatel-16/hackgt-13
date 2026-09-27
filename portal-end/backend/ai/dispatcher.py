@@ -12,7 +12,7 @@ from ai import prompts as prompt_store
 from ai.llm import call_llm, gemini_configured, last_llm_error, parse_llm_json
 from models.message import Message
 from models.report import Report
-from packets.serial_schema import Category
+from packets.serial_schema import Category, decode_needs
 from schemas.agent import DispatcherActionOut, DispatcherBoardOut
 
 logger = logging.getLogger(__name__)
@@ -144,25 +144,42 @@ def _open_reports(db: Session) -> list[Report]:
     )
 
 
+def _is_auto_dispatch(text: str | None) -> bool:
+    body = " ".join((text or "").split())
+    return body.startswith("Dispatch #") and "sent for your" in body
+
+
 def _pending_replies(db: Session) -> list[Message]:
-    """Latest message per user, kept when that message is still an uplink."""
-    latest_id = (
-        db.query(Message.user_id, func.max(Message.id).label("max_id"))
-        .filter(Message.user_id.isnot(None))
-        .group_by(Message.user_id)
-        .subquery()
-    )
-    rows = (
-        db.query(Message)
-        .join(latest_id, Message.id == latest_id.c.max_id)
-        .all()
-    )
-    pending = [row for row in rows if row.direction == "uplink" and row.user_id is not None]
-    pending.sort(key=lambda row: row.id or 0, reverse=True)
+    """Inbound texts with no real reply yet. The automatic dispatch notice does not count."""
+    user_ids = [
+        user_id
+        for (user_id,) in db.query(Message.user_id).filter(Message.user_id.isnot(None)).distinct()
+    ]
+    pending: list[Message] = []
+    for user_id in user_ids:
+        rows = (
+            db.query(Message)
+            .filter(Message.user_id == user_id)
+            .order_by(Message.id.desc())
+            .limit(40)
+            .all()
+        )
+        latest_uplink = next((row for row in rows if row.direction == "uplink"), None)
+        if latest_uplink is None or latest_uplink.id is None:
+            continue
+        later = [
+            row
+            for row in rows
+            if row.direction == "downlink" and row.id is not None and row.id > latest_uplink.id
+        ]
+        if any(not _is_auto_dispatch(row.text) for row in later):
+            continue
+        pending.append(latest_uplink)
+    pending.sort(key=lambda row: row.id or 0)
     return pending
 
 
-def _snapshot_lines(reports: list[Report], queued: set[int]) -> str:
+def _snapshot_lines(reports: list[Report], queued: set[int], *, include_status: bool = False) -> str:
     if not reports:
         return "(none)"
     lines = []
@@ -185,6 +202,7 @@ def _snapshot_lines(reports: list[Report], queued: set[int]) -> str:
                     f"loc={report.location or ''}",
                     f"ack={ack}",
                     f"queued={'yes' if report.id in queued else 'no'}",
+                    f"resolved={'yes' if report.resolved else 'no'}" if include_status else "",
                     f"summary={summary}",
                 ]
             )
@@ -405,6 +423,133 @@ def board_status(db: Session) -> DispatcherBoardOut:
     )
 
 
+def _reply_target(db: Session, pending: list[Message], reports: list[Report]) -> Message | None:
+    """Most urgent unanswered text, then the one that has been waiting longest."""
+    if not pending:
+        return None
+    priority: dict[int, int] = {}
+    for report in reports:
+        current = priority.get(report.user_id, 0)
+        priority[report.user_id] = max(current, report.ai_priority or 0)
+    missing = [row.user_id for row in pending if row.user_id is not None and row.user_id not in priority]
+    if missing:
+        for user_id, level in (
+            db.query(Report.user_id, Report.ai_priority).filter(Report.user_id.in_(missing)).all()
+        ):
+            current = priority.get(user_id, 0)
+            priority[user_id] = max(current, level or 0)
+    return min(pending, key=lambda row: (-priority.get(row.user_id or 0, 0), row.id or 0))
+
+
+def _context_reports(db: Session, user_id: int) -> list[Report]:
+    return (
+        db.query(Report)
+        .filter(Report.user_id == user_id)
+        .order_by(Report.created_at.asc(), Report.id.asc())
+        .all()
+    )
+
+
+def _report_blocks(reports: list[Report]) -> str:
+    if not reports:
+        return "(none)"
+    blocks = []
+    for report in reports:
+        needs = ", ".join(decode_needs(report.needs or 0)) or "none"
+        status = "closed" if report.resolved else "open"
+        blocks.append(
+            "\n".join(
+                [
+                    f"Report {report.id} ({status})",
+                    f"priority: {report.ai_priority or 0}",
+                    f"type: {_category_name(report.category)}",
+                    f"help: {_crew(report)}",
+                    f"people: {report.people or 0}",
+                    f"needs: {needs}",
+                    f"location: {report.location or ''}",
+                    f"their report: {report.message or ''}",
+                    f"summary: {report.ai_summary or ''}",
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def _thread_lines(db: Session, user_id: int) -> str:
+    rows = (
+        db.query(Message)
+        .filter(Message.user_id == user_id)
+        .order_by(Message.id.asc())
+        .all()
+    )
+    if not rows:
+        return "(none)"
+    lines = []
+    for row in rows:
+        speaker = "them" if row.direction == "uplink" else "dispatch"
+        lines.append(f"{speaker}: {row.text or ''}")
+    return "\n".join(lines)
+
+
+def _fallback_reply(inbound: str) -> str:
+    words = _clip(inbound, 120)
+    if words:
+        return (
+            f"I hear you. You said: {words} "
+            "Stay as safe as you can, and tell me what changed so I can keep helping."
+        )
+    return "I hear you. Stay as safe as you can, and tell me what is happening right now so I can help."
+
+
+def _answer_pending(
+    db: Session,
+    pending: list[Message],
+    reports: list[Report],
+    fingerprint: str,
+) -> DispatcherActionOut | None:
+    """Reply before the next route, including texts that arrived before Agent Mode."""
+    target = _reply_target(db, pending, reports)
+    if target is None or target.user_id is None:
+        return None
+    user_id = int(target.user_id)
+    context = _context_reports(db, user_id)
+    inbound = (target.text or "").strip() or "(empty)"
+    prompt = prompt_store.render(
+        "agent_reply",
+        inbound=inbound,
+        thread=_thread_lines(db, user_id),
+        reports=_report_blocks(context),
+    )
+    raw = call_llm(
+        prompt,
+        system="You are a sympathetic first-responder dispatcher. Reply with one JSON object only. No markdown.",
+        max_output_tokens=384,
+        json_mode=True,
+    )
+    thought = "Answering their text."
+    text = ""
+    if raw:
+        try:
+            payload = parse_llm_json(raw)
+        except Exception:
+            logger.exception("Reply was not valid JSON")
+            payload = {}
+        text = _clip(str(payload.get("text") or ""), _TEXT_MAX)
+        thought = _clip(str(payload.get("thought") or thought), _THOUGHT_MAX) or thought
+    if not text:
+        if last_llm_error() and "API key" in last_llm_error():
+            return _wait(last_llm_error() or "Gemini rejected the API key. Agent paused.", fingerprint, gemini_ok=False)
+        text = _fallback_reply(inbound if inbound != "(empty)" else "")
+        thought = "Sending a short reply to their text."
+    return DispatcherActionOut(
+        thought=thought,
+        type="message",
+        user_id=user_id,
+        text=text,
+        fingerprint=fingerprint,
+    )
+
+
 def next_action(
     db: Session,
     *,
@@ -415,6 +560,14 @@ def next_action(
     reports, pending, fingerprint = load_board(db)
     if not reports and not pending:
         return _wait("Board is clear.", fingerprint)
+
+    if pending:
+        if not gemini_configured():
+            logger.warning("Dispatcher paused; GEMINI_API_KEY is not set")
+            return _wait("GEMINI_API_KEY is not set. Agent paused.", fingerprint, gemini_ok=False)
+        reply = _answer_pending(db, pending, reports, fingerprint)
+        if reply is not None:
+            return reply
 
     if not gemini_configured():
         logger.warning("Dispatcher paused; GEMINI_API_KEY is not set")

@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useInbox } from '../hooks/useInbox'
 import type { Incident } from '../types/incident'
 import type { ConversationSummary } from '../types/message'
 import { displayName } from '../utils/groupIncidents'
-import { isConversationUnread, markConversationRead } from '../utils/messageRead'
 import { parseServerTime } from '../utils/serverTime'
 import ChatThread from '../components/ChatThread'
 
 interface Props {
   incidents: Incident[]
+  conversations: ConversationSummary[]
+  loading: boolean
+  error: string | null
+  unreadByUser: Map<number, number>
   selectedUserId: number | null
   onSelectUser: (userId: number) => void
   composeText?: string | null
@@ -50,7 +52,16 @@ function matchesQuery(
   )
 }
 
-export default function MessagesView({ incidents, selectedUserId, onSelectUser, composeText = null }: Props) {
+export default function MessagesView({
+  incidents,
+  conversations,
+  loading,
+  error,
+  unreadByUser,
+  selectedUserId,
+  onSelectUser,
+  composeText = null,
+}: Props) {
   const seeds = useMemo(() => {
     const map = new Map<number, { userName?: string; node: string }>()
     for (const incident of incidents) {
@@ -74,14 +85,8 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser, 
     return map
   }, [seeds])
 
-  const { conversations, loading, error } = useInbox(
-    true,
-    seeds.map(({ userId, userName }) => ({ userId, userName })),
-  )
   const [query, setQuery] = useState('')
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set())
-  /** In-memory read set so unread clears immediately on open (localStorage is backup). */
-  const [readUserIds, setReadUserIds] = useState<Set<number>>(() => new Set())
 
   useEffect(() => {
     if (!query.trim()) return
@@ -90,15 +95,15 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser, 
 
   useEffect(() => {
     if (selectedUserId == null) return
-    const conversation = conversations.find(c => c.userId === selectedUserId)
-    markConversationRead(selectedUserId, conversation?.lastMessage?.created_at)
-    setReadUserIds(current => {
-      if (current.has(selectedUserId)) return current
+    const nodeId = nodeByUser.get(selectedUserId)
+    if (!nodeId) return
+    setCollapsedNodes(current => {
+      if (!current.has(nodeId)) return current
       const next = new Set(current)
-      next.add(selectedUserId)
+      next.delete(nodeId)
       return next
     })
-  }, [selectedUserId, conversations])
+  }, [selectedUserId, nodeByUser])
 
   const filtered = conversations.filter(conversation => {
     const nodeId = nodeByUser.get(conversation.userId) ?? 'unassigned'
@@ -156,24 +161,8 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser, 
     })
   }
 
-  function conversationUnread(conversation: ConversationSummary): boolean {
-    return (
-      selectedUserId !== conversation.userId &&
-      !readUserIds.has(conversation.userId) &&
-      isConversationUnread(conversation.lastMessage, conversation.userId)
-    )
-  }
-
-  function selectUser(userId: number) {
-    const conversation = conversations.find(c => c.userId === userId)
-    markConversationRead(userId, conversation?.lastMessage?.created_at)
-    setReadUserIds(current => {
-      if (current.has(userId)) return current
-      const next = new Set(current)
-      next.add(userId)
-      return next
-    })
-    onSelectUser(userId)
+  function conversationUnreadCount(conversation: ConversationSummary): number {
+    return unreadByUser.get(conversation.userId) ?? 0
   }
 
   return (
@@ -194,7 +183,7 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser, 
         <div className="conversation-list">
           {nodeGroups.map(group => {
             const expanded = !collapsedNodes.has(group.nodeId)
-            const groupUnread = group.conversations.some(conversationUnread)
+            const groupUnread = group.conversations.some(conversation => conversationUnreadCount(conversation) > 0)
             return (
               <div key={group.nodeId} className={`node-group ${expanded ? 'open' : ''}`}>
                 <button
@@ -224,14 +213,14 @@ export default function MessagesView({ incidents, selectedUserId, onSelectUser, 
                       ? relativeTime(conversation.lastMessage.created_at)
                       : ''
                     const isSelected = selectedUserId === conversation.userId
-                    const unread = conversationUnread(conversation)
+                    const unread = conversationUnreadCount(conversation) > 0
                     return (
                       <button
                         key={conversation.userId}
                         type="button"
                         className={`conversation-row ${isSelected ? 'selected' : ''} ${unread ? 'unread' : ''}`}
                         data-conversation-user={conversation.userId}
-                        onClick={() => selectUser(conversation.userId)}
+                        onClick={() => onSelectUser(conversation.userId)}
                       >
                         <span className="conversation-top">
                           <span className="conversation-name">
