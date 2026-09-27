@@ -205,7 +205,12 @@ async function post(url, body, button, errId) {
   }
 }
 
+const civilianName = $("civilian-name");
+civilianName.addEventListener("input", () => civilianName.setCustomValidity(""));
+
 $("send-sos").addEventListener("click", async () => {
+  civilianName.setCustomValidity(civilianName.value.trim() ? "" : "Please enter your name.");
+  if (!civilianName.reportValidity()) return;
   if (!state.emergency) {
     $("emergency-selection").classList.add("bad");
     return showMsg("emergency-message", "Please select an emergency type first.");

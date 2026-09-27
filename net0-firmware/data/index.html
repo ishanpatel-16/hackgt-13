@@ -16,7 +16,10 @@
 </header>
 
 <section id="request-screen" class="screen active panel" aria-label="Emergency request form">
-<h2>What's happening?</h2>
+<label for="civilian-name">Your name</label>
+<input id="civilian-name" type="text" placeholder="Enter your name" autocomplete="name" required>
+
+<h2 class="gap">What's happening?</h2>
 <div id="emergency-selection" class="grid" role="group" aria-label="Emergency type">
 <button class="opt medical" type="button" data-emergency="medical" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z"/></svg><b class="chk">✓</b>Medical</button>
 <button class="opt fire" type="button" data-emergency="fire" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M13 3c1 5-4 5-3 9 2 0 3-2 4-3 3 3 5 5 5 8a7 7 0 0 1-14 0c0-5 5-8 8-14Z"/></svg><b class="chk">✓</b>Fire</button>
@@ -31,9 +34,6 @@
 <div id="people-count" aria-live="polite">1</div>
 <button id="increment-people" type="button" aria-label="More people">+</button>
 </div>
-
-<label class="gap" for="civilian-name">Your name (optional)</label>
-<input id="civilian-name" type="text" placeholder="Enter your name" autocomplete="name">
 
 <label class="gap" for="location">Where are you?</label>
 <input id="location" maxlength="63" placeholder="e.g. Klaus, Floor 3, Room 2443" autocomplete="off">
