@@ -50,6 +50,9 @@ def _ensure_report_cluster_columns() -> None:
     except Exception:
         return
     statements: list[str] = []
+    if "cluster_id" not in columns:
+        statements.append("ALTER TABLE reports ADD COLUMN cluster_id VARCHAR(64)")
+        statements.append("CREATE INDEX IF NOT EXISTS ix_reports_cluster_id ON reports (cluster_id)")
     if "cluster_summary" not in columns:
         statements.append("ALTER TABLE reports ADD COLUMN cluster_summary VARCHAR(600)")
     if "cluster_responders" not in columns:

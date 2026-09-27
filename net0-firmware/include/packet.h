@@ -26,15 +26,20 @@
 #define WIFI_CHANNEL  6       // AP and ESP-NOW must share one channel on every board
 #define HEARTBEAT_MS  10000
 
-// Report retries: resend until ACKed, waiting 3 s, 6 s, 12 s ... capped at 30 s.
+// Report retries: resend until ACKed, waiting 3 s, 6 s, 12 s ... capped at 15 s.
 #define RETRY_FIRST_MS 3000
-#define RETRY_MAX_MS   30000
+#define RETRY_MAX_MS   15000
 #define MAX_ATTEMPTS   255
 
 // Messages have no ACK from the phone, so the gateway just floods each one a
 // few times (same msg_id, attempt 0, 1, 2). Nodes keep only the first copy.
 #define MESSAGE_SENDS    3
 #define MESSAGE_RESEND_MS 1500
+
+// ACKs are broadcast too, so one lost copy used to cost the node a full retry.
+// The gateway now floods each ACK a few times, closer together than messages.
+#define ACK_SENDS      3
+#define ACK_RESEND_MS  400
 
 // "packed" = no padding bytes between fields, so every board lays the bytes
 // out identically and we can memcpy the struct straight onto the radio.
