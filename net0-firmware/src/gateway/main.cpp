@@ -13,6 +13,14 @@
 
 static uint32_t lastHeartbeat = 0;
 
+// Radio watchdog. Sometimes the gateway's ESP-NOW goes deaf and mute (seen right
+// after an ACK flood while BLE is busy) and only a reboot brings it back. Nodes
+// heartbeat every 10 s, so if we've heard the mesh before and then hear nothing
+// for this long, reboot. The backend reconnects over BLE by itself and nodes keep
+// retrying unACKed reports, so nothing is lost.
+#define MESH_SILENCE_MS 30000
+static uint32_t lastMeshRx = 0;  // 0 = haven't heard any node since boot
+
 // Append s to out as a JSON string literal (with escaping).
 static void jsonString(String &out, const char *s) {
   out += '"';
@@ -191,6 +199,7 @@ static void handleRx(RxItem &item) {
   if (!isValid(p)) return;
   if (!isNeighbor(p.last_hop)) return;
   learnNeighbor(p.last_hop, item.mac);
+  lastMeshRx = millis();
   if (p.type == PKT_ACK || p.type == PKT_MESSAGE) return;  // our own packets echoing back
   // Each retry (new attempt) is a new copy. If we already know the backend saved
   // it we re-ACK below; otherwise it goes to the backend, which dedups on msg_id.
@@ -242,6 +251,12 @@ void loop() {
   static uint8_t frame[BK_MESSAGE_LEN];
   while (nextBackendMessage(frame)) startMessage(frame);
   resendOutgoing();
+
+  if (lastMeshRx && millis() - lastMeshRx > MESH_SILENCE_MS) {
+    Serial.printf("[wdt] no mesh packets for %d s, rebooting to reset the radio\n", MESH_SILENCE_MS / 1000);
+    delay(100);
+    ESP.restart();
+  }
 
   // Gateway's own heartbeat: never sent to the backend (it rejects node ID 0;
   // the BLE connection itself tells it the gateway is alive). On the mesh it's a
