@@ -115,7 +115,7 @@ def run_agent(payload: AgentRunIn, db: Session = Depends(get_db)):
     return AgentRunOut(
         plan=plan,
         brief=brief,
-        processed_reports=db.query(Report).count(),
+        processed_reports=db.query(Report).filter(Report.resolved.is_(False)).count(),
         status="ok" if gemini_configured() and plan is not None else "fallback",
     )
 
@@ -131,7 +131,7 @@ def get_rescue_plan(report_id: int, db: Session = Depends(get_db)):
     return AgentRunOut(
         plan=plan,
         brief=build_brief(db),
-        processed_reports=db.query(Report).count(),
+        processed_reports=db.query(Report).filter(Report.resolved.is_(False)).count(),
         status="ok" if gemini_configured() and plan is not None else "fallback",
     )
 

@@ -10,8 +10,10 @@ interface Props {
   now: number
   expanded: boolean
   selectedId: string | null
+  dispatchIds: string[]
   onToggle: () => void
   onSelectReport: (id: string) => void
+  onToggleDispatch: (id: string) => void
   onMessage: (userId: number) => void
   messaging: boolean
 }
@@ -21,8 +23,10 @@ export default function UserIncidentGroupRow({
   now,
   expanded,
   selectedId,
+  dispatchIds,
   onToggle,
   onSelectReport,
+  onToggleDispatch,
   onMessage,
   messaging,
 }: Props) {
@@ -74,7 +78,9 @@ export default function UserIncidentGroupRow({
               report={report}
               now={now}
               selected={selectedId === report.id}
+              inDispatch={dispatchIds.includes(report.id)}
               onSelect={() => onSelectReport(report.id)}
+              onToggleDispatch={() => onToggleDispatch(report.id)}
             />
           ))}
         </div>
@@ -87,39 +93,49 @@ function ReportRow({
   report,
   now,
   selected,
+  inDispatch,
   onSelect,
+  onToggleDispatch,
 }: {
   report: Incident
   now: number
   selected: boolean
+  inDispatch: boolean
   onSelect: () => void
+  onToggleDispatch: () => void
 }) {
   return (
-    <button
-      type="button"
-      data-report-id={report.id}
-      className={`report-row ${selected ? 'selected' : ''}`}
-      aria-pressed={selected}
-      onClick={onSelect}
-    >
-      {report.status === 'NEW' && <span className="report-status new">NEW</span>}
-      <span className="report-main">
-        <span className="report-row-top">
-          <span className="report-body">
-            <span className="report-place">{report.placeName || report.location || 'Location not provided'}</span>
+    <div data-report-id={report.id} className={`report-row ${selected ? 'selected' : ''}`}>
+      <button type="button" className="report-row-hit" aria-pressed={selected} onClick={onSelect}>
+        {report.status === 'NEW' && <span className="report-status new">NEW</span>}
+        <span className="report-main">
+          <span className="report-row-top">
+            <span className="report-body">
+              <span className="report-place">{report.placeName || report.location || 'Location not provided'}</span>
+            </span>
+            <PriorityMeter level={report.priority} />
+            <span className="report-age" title={formatClock(report.arrivedAt) || undefined}>
+              {formatRelativeTime(report.arrivedAt, now)}
+            </span>
           </span>
-          <PriorityMeter level={report.priority} />
-          <span className="report-age" title={formatClock(report.arrivedAt) || undefined}>
-            {formatRelativeTime(report.arrivedAt, now)}
-          </span>
+          {report.aiResponders.length > 0 ? (
+            <ResponderPills responders={report.aiResponders} className="report-pills" />
+          ) : report.respondersReady === false ? (
+            <span className="ai-pending-label">AI pending</span>
+          ) : null}
         </span>
-        {report.aiResponders.length > 0 ? (
-          <ResponderPills responders={report.aiResponders} className="report-pills" />
-        ) : report.respondersReady === false ? (
-          <span className="ai-pending-label">AI pending</span>
-        ) : null}
-      </span>
-    </button>
+      </button>
+      <button
+        type="button"
+        className={`report-dispatch-btn ${inDispatch ? 'on' : ''}`}
+        aria-pressed={inDispatch}
+        aria-label={inDispatch ? 'Remove from dispatch' : 'Add to dispatch'}
+        title={inDispatch ? 'Remove from dispatch' : 'Add to dispatch'}
+        onClick={onToggleDispatch}
+      >
+        {inDispatch ? '✓' : '+'}
+      </button>
+    </div>
   )
 }
 

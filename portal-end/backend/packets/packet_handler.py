@@ -226,6 +226,7 @@ def _handle_report(
         location=pkt.location,
         message=pkt.message,
         status="received",
+        resolved=False,
     )
 
     report.acked_at = utcnow()

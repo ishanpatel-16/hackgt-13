@@ -43,6 +43,7 @@ def ensure_report_ai(db: Session, *, limit: int = 40) -> int:
     """Fill missing per-report AI fields via Gemini (never invent local summaries)."""
     pending = (
         db.query(Report)
+        .filter(Report.resolved.is_(False))
         .filter(or_(Report.ai_summary.is_(None), Report.ai_priority.is_(None), Report.ai_responders.is_(None)))
         .order_by(Report.created_at.desc())
         .limit(limit)
@@ -184,18 +185,20 @@ def build_plan(
         ensure_report_ai(db)
     if groups is None:
         groups = load_clusters(db)
-    all_reports = db.query(Report).all()
+    all_reports = db.query(Report).filter(Report.resolved.is_(False)).all()
     if not all_reports:
         return None
     report = None
     if report_id is not None:
         report = db.get(Report, report_id) or db.query(Report).filter(Report.msg_id == report_id).first()
+        if report is not None and report.resolved:
+            return None
     if report is None:
         report = max(all_reports, key=lambda item: (item.ai_priority or 0, item.created_at))
     if report is None:
         return None
 
-    cluster = groups.get(report.cluster_id or "", [report])
+    cluster = [item for item in groups.get(report.cluster_id or "", [report]) if not item.resolved]
     if report not in cluster:
         cluster = [report]
     network = _network(db)
@@ -250,7 +253,12 @@ def build_brief(
         ensure_report_ai(db)
     if groups is None:
         groups = load_clusters(db)
-    reports = db.query(Report).order_by(Report.created_at.desc()).all()
+    reports = (
+        db.query(Report)
+        .filter(Report.resolved.is_(False))
+        .order_by(Report.created_at.desc())
+        .all()
+    )
     network = _network(db)
     if not reports:
         return AgentBriefOut(

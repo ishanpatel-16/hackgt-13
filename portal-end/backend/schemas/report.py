@@ -16,6 +16,7 @@ class ReportList(BaseModel):
     needs: int
     location: str
     status: str
+    resolved: bool = False
     ai_priority: int | None = None
     created_at: datetime
     acked_at: datetime | None = None

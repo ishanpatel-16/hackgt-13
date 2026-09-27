@@ -6,11 +6,31 @@ import 'leaflet.heat'
 import type { AiResponder, Incident } from '../types/incident'
 import { emergencyIconHtml } from './EmergencyIcon'
 import { AI_RESPONDERS, RESPONDER_COLOR, RESPONDER_LABEL, RESPONDER_SHORT } from '../utils/responders'
+import { buildStreetGraph, routeDispatch, type StreetGraph } from '../utils/streetRoute'
+
+export interface DispatchStop {
+  id: string
+  lat: number
+  lon: number
+}
 
 interface Props {
   incidents: Incident[]
   selectedId: string | null
   onSelectIncident: (id: string) => void
+  /** Close the open report-detail panel without selecting another incident. */
+  onClearSelection?: () => void
+  devicePosition?: L.LatLngTuple | null
+  dispatchStops?: DispatchStop[]
+  /** Dispatch list order. Numbers on the map follow this sequence. */
+  dispatchOrder?: string[]
+  highlightedDispatchId?: string | null
+  /** Bump `token` to fly the map to this dispatch stop again. */
+  dispatchFocus?: { id: string; token: number } | null
+  /** Bump to fit every incident back into the open map. */
+  overviewToken?: number
+  /** Cumulative street-route arrival minutes for the current dispatch stops. */
+  onDispatchEtas?: (etas: Record<string, number>) => void
 }
 
 interface IncidentCluster {
@@ -524,7 +544,7 @@ function clusterPopup(cluster: IncidentCluster): string {
   return `<div class="cluster-popup-content">
     <span class="cluster-popup-kicker">${cluster.incidents.length} linked reports</span>
     <strong>${escapeHtml(summary)}</strong>
-    <span class="cluster-popup-meta">${people} ${people === 1 ? 'person' : 'people'} reported · ${clusterPriorityLabel(maxPriority)}</span>
+    <span class="cluster-popup-meta">${people} ${people === 1 ? 'person' : 'people'} involved · ${clusterPriorityLabel(maxPriority)}</span>
     ${responderPillsHtml(responders)}
   </div>`
 }
@@ -559,22 +579,153 @@ function leftChromeWidth(map: L.Map): number {
   return queueW + peekW + 24
 }
 
+/** Map-container pixels covered by the incident list on the left and the dispatch dock on the right. */
+function focusInsets(map: L.Map): { left: number; right: number } {
+  const mapRect = map.getContainer().getBoundingClientRect()
+  const workspace = map.getContainer().closest('.workspace')
+  const blockers = [
+    workspace?.querySelector('.queue-panel'),
+    workspace?.querySelector('.report-detail-peek'),
+    document.querySelector('.corner-stack'),
+  ]
+  let left = 24
+  let right = 24
+  const midX = (mapRect.left + mapRect.right) / 2
+  for (const node of blockers) {
+    if (!(node instanceof HTMLElement)) continue
+    const rect = node.getBoundingClientRect()
+    if (rect.width < 8 || rect.height < 8) continue
+    const overlaps =
+      rect.right > mapRect.left + 8 &&
+      rect.left < mapRect.right - 8 &&
+      rect.bottom > mapRect.top + 8 &&
+      rect.top < mapRect.bottom - 8
+    if (!overlaps) continue
+    const centerX = (rect.left + rect.right) / 2
+    if (centerX < midX) left = Math.max(left, rect.right - mapRect.left + 28)
+    else right = Math.max(right, mapRect.right - rect.left + 28)
+  }
+  const minGap = 140
+  if (left + right > mapRect.width - minGap) {
+    const scale = Math.max(0.2, (mapRect.width - minGap) / Math.max(1, left + right))
+    left *= scale
+    right *= scale
+  }
+  return { left, right }
+}
+
 const PIN_FOCUS_ZOOM = 17.5
 const CLUSTER_FOCUS_ZOOM = 17.25
 /** Vertical room reserved above the cluster for the info popup. */
 const CLUSTER_POPUP_TOP_PAD = 150
 
+/** Geographic extent of the colored heat, including the blur fringe. */
+function heatLatLngBounds(cluster: IncidentCluster, zoom: number): L.LatLngBounds {
+  const points = organicHeatPoints(cluster, zoom)
+  const style = heatStyleForZoom(zoom, PRIORITY_HEAT_GRADIENTS[3])
+  const padPx = (style.radius ?? 25) + (style.blur ?? 15) + 10
+  const lat = cluster.center[0]
+  const padMeters = padPx * metersPerPixel(lat, zoom)
+  const latPad = padMeters / 111_000
+  const lonPad = padMeters / Math.max(1e-6, 111_000 * Math.cos((lat * Math.PI) / 180))
+  const bounds = L.latLngBounds([cluster.center, cluster.center])
+  const samples = points.length ? points : [[cluster.center[0], cluster.center[1], 1] as HeatPoint]
+  for (const [pointLat, pointLon] of samples) {
+    bounds.extend([pointLat - latPad, pointLon - lonPad])
+    bounds.extend([pointLat + latPad, pointLon + lonPad])
+  }
+  return bounds
+}
+
+function clusterPopupBox(map: L.Map): { width: number; height: number } {
+  const node = map.getContainer().querySelector('.cluster-popup')
+  if (!(node instanceof HTMLElement)) return { width: 250, height: CLUSTER_POPUP_TOP_PAD }
+  const rect = node.getBoundingClientRect()
+  if (rect.width < 8 || rect.height < 8) return { width: 250, height: CLUSTER_POPUP_TOP_PAD }
+  return { width: rect.width, height: rect.height }
+}
+
+/**
+ * Screen box of the heat plus the cluster card that sits on its north edge.
+ * The card is part of the fitted content so the blob itself stays in the
+ * map area the card, queue, and docks do not cover.
+ */
+function clusterScreenLayout(
+  map: L.Map,
+  cluster: IncidentCluster,
+  zoom: number,
+  popup: { width: number; height: number },
+) {
+  const bounds = heatLatLngBounds(cluster, zoom)
+  const southWest = map.project(bounds.getSouthWest(), zoom)
+  const northEast = map.project(bounds.getNorthEast(), zoom)
+  const anchor = map.project(
+    clusterPopupAnchor(cluster.center, clusterPopupRadiusMeters(cluster, zoom)),
+    zoom,
+  )
+  // Popup offset (0, 10) pulls the tip down onto the heat fringe.
+  const anchorY = anchor.y + 10
+  let minX = Math.min(southWest.x, northEast.x)
+  let maxX = Math.max(southWest.x, northEast.x)
+  let minY = Math.min(southWest.y, northEast.y)
+  let maxY = Math.max(southWest.y, northEast.y)
+  minX = Math.min(minX, anchor.x - popup.width / 2)
+  maxX = Math.max(maxX, anchor.x + popup.width / 2)
+  minY = Math.min(minY, anchorY - popup.height)
+  maxY = Math.max(maxY, anchorY)
+  return {
+    width: maxX - minX,
+    height: maxY - minY,
+    center: L.point((minX + maxX) / 2, (minY + maxY) / 2),
+  }
+}
+
+/** Zoom out only as far as needed so the whole cluster sits in the open map. */
+function fitClusterInFreeSpace(map: L.Map, cluster: IncidentCluster) {
+  const size = map.getSize()
+  const { left, right } = focusInsets(map)
+  const popup = clusterPopupBox(map)
+  const margin = 20
+  const freeLeft = left + margin
+  const freeRight = right + margin
+  const freeTop = margin
+  const freeBottom = margin
+  const availW = Math.max(64, size.x - freeLeft - freeRight)
+  const availH = Math.max(64, size.y - freeTop - freeBottom)
+  const snap = map.options.zoomSnap || 0.25
+  const minZoom = map.getMinZoom()
+  const start = map.getZoom()
+  const steps = Math.max(0, Math.round((start - minZoom) / snap))
+  let chosen = minZoom
+  for (let index = 0; index <= steps; index += 1) {
+    const zoom = Math.round((start - index * snap) / snap) * snap
+    const layout = clusterScreenLayout(map, cluster, zoom, popup)
+    if (layout.width <= availW && layout.height <= availH) {
+      chosen = zoom
+      break
+    }
+  }
+  const layout = clusterScreenLayout(map, cluster, chosen, popup)
+  const desiredX = freeLeft + availW / 2
+  const desiredY = freeTop + availH / 2
+  const viewCenter = map.unproject(
+    L.point(layout.center.x - desiredX + size.x / 2, layout.center.y - desiredY + size.y / 2),
+    chosen,
+  )
+  map.flyTo(viewCenter, chosen, { animate: true, duration: 0.4, easeLinearity: 0.35 })
+}
+
 function flyPinIntoView(
   map: L.Map,
   latlng: L.LatLngExpression,
   animate: boolean,
-  options?: { zoom?: number; topPad?: number },
+  options?: { zoom?: number; topPad?: number; allowZoomOut?: boolean },
 ) {
-  const zoom = Math.max(map.getZoom(), options?.zoom ?? PIN_FOCUS_ZOOM)
+  const requested = options?.zoom ?? PIN_FOCUS_ZOOM
+  const zoom = options?.allowZoomOut ? requested : Math.max(map.getZoom(), requested)
   const size = map.getSize()
-  const left = leftChromeWidth(map)
-  const visible = Math.max(160, size.x - left)
-  const desiredX = left + visible * 0.55
+  const { left, right } = focusInsets(map)
+  const desiredX = left + (size.x - left - right) / 2
   // Shift the target down so content above it (cluster popup) stays in frame.
   const topPad = options?.topPad ?? 0
   const desiredY = size.y / 2 + topPad / 2
@@ -599,6 +750,15 @@ function markerTitle(incident: Incident): string {
 
 function markerClasses(incident: Incident, selectedId: string | null): string {
   return `geo-marker sos ${incident.type.toLowerCase()} ${incident.status === 'NEW' ? 'new' : ''} ${selectedId === incident.id ? 'chosen' : ''}`.trim()
+}
+
+function responderIcon() {
+  return L.divIcon({
+    className: 'responder-marker-host',
+    html: '<span class="responder-marker" title="This portal"><i></i></span>',
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  })
 }
 
 function markerDivIcon(button: HTMLButtonElement, size: number): L.DivIcon {
@@ -634,12 +794,28 @@ function applyPinElementSize(marker: L.Marker, button: HTMLButtonElement, size: 
   }
 }
 
-export default function IncidentMap({ incidents, selectedId, onSelectIncident }: Props) {
+export default function IncidentMap({
+  incidents,
+  selectedId,
+  onSelectIncident,
+  onClearSelection,
+  devicePosition = null,
+  dispatchStops = [],
+  dispatchOrder = [],
+  highlightedDispatchId = null,
+  dispatchFocus = null,
+  overviewToken = 0,
+  onDispatchEtas,
+}: Props) {
   const host = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<string, { marker: L.Marker; button: HTMLButtonElement }>>(new Map())
   const layerRef = useRef<L.LayerGroup | null>(null)
   const clusterLayerRef = useRef<L.LayerGroup | null>(null)
+  const routeLayerRef = useRef<L.LayerGroup | null>(null)
+  const deviceLayerRef = useRef<L.LayerGroup | null>(null)
+  const deviceMarkerRef = useRef<L.Marker | null>(null)
+  const routeSignatureRef = useRef('')
   const heatLayersRef = useRef<Map<PriorityLevel, L.HeatLayer>>(new Map())
   const heatSignatureRef = useRef('')
   const clustersDataRef = useRef<IncidentCluster[]>([])
@@ -657,13 +833,19 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
   const savedClusterViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null)
   const suppressRestoreRef = useRef(false)
   const selectRef = useRef(onSelectIncident)
+  const clearSelectRef = useRef(onClearSelection)
   const selectedRef = useRef(selectedId)
+  const clusterFitTokenRef = useRef(0)
   const firstSelect = useRef(true)
   const didFit = useRef(false)
   const [mapError, setMapError] = useState(false)
+  const [streetGraph, setStreetGraph] = useState<StreetGraph | null>(null)
   const syncMapChromeRef = useRef<(map: L.Map, opts?: { syncHeat?: boolean }) => void>(() => {})
+  const onDispatchEtasRef = useRef(onDispatchEtas)
+  onDispatchEtasRef.current = onDispatchEtas
 
   selectRef.current = onSelectIncident
+  clearSelectRef.current = onClearSelection
   selectedRef.current = selectedId
 
   /** Cluster outlines + per-pin hover. Pin-direct hover suppresses cluster-wide outlines. */
@@ -791,7 +973,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       preferCanvas: true,
     })
     mapRef.current = map
-    L.control.zoom({ position: 'bottomright' }).addTo(map)
+    L.control.zoom({ position: 'bottomleft' }).addTo(map)
     map.attributionControl.setPrefix(false)
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_3z1f_1_5d09fcb81bc5744792fbd5f9', {
@@ -831,8 +1013,10 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       setHoverPin(null)
       setHoverCluster(null)
     })
-    // Markers sit above the heat overlay pane so SOS icons stay clickable and visible.
+    // Route under the pins; the portal marker sits above both.
+    routeLayerRef.current = L.layerGroup().addTo(map)
     layerRef.current = L.layerGroup().addTo(map)
+    deviceLayerRef.current = L.layerGroup().addTo(map)
 
     map.on('popupclose', event => {
       for (const [id, entry] of clusterHitRef.current) {
@@ -853,6 +1037,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       })
       .then((data: FeatureCollection) => {
         if (controller.signal.aborted) return
+        setStreetGraph(buildStreetGraph(data))
         const overlay = {
           type: 'FeatureCollection' as const,
           features: data.features.filter(feature => {
@@ -887,6 +1072,9 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       map.remove()
       mapRef.current = null
       layerRef.current = null
+      routeLayerRef.current = null
+      deviceLayerRef.current = null
+      deviceMarkerRef.current = null
       clusterLayerRef.current = null
       heatLayersRef.current.clear()
       heatSignatureRef.current = ''
@@ -971,6 +1159,8 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
         L.DomEvent.stopPropagation(event.originalEvent)
         const entry = clusterHitRef.current.get(clusterId)
         if (!entry) return
+        const fitToken = ++clusterFitTokenRef.current
+        const incidentWasOpen = selectedRef.current != null
         // Always snapshot the view right before cluster focus so close can restore it,
         // even if an incident detail selection is already holding savedViewRef.
         savedClusterViewRef.current = { center: map.getCenter(), zoom: map.getZoom() }
@@ -982,10 +1172,28 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
           clusterPopupRadiusMeters(entry.cluster, map.getZoom()),
         )
         entry.popup.setLatLng(nextAnchor).openOn(map)
-        flyPinIntoView(map, entry.cluster.center, true, {
-          zoom: CLUSTER_FOCUS_ZOOM,
-          topPad: CLUSTER_POPUP_TOP_PAD,
-        })
+        if (incidentWasOpen) {
+          // Drop the report panel first so the fit uses the map it was covering.
+          clearSelectRef.current?.()
+          const run = (tries: number) => {
+            if (clusterFitTokenRef.current !== fitToken) return
+            const peek = map.getContainer().closest('.workspace')?.querySelector('.report-detail-peek')
+            if (peek && tries > 0) {
+              requestAnimationFrame(() => run(tries - 1))
+              return
+            }
+            if (openClusterIdRef.current !== clusterId) return
+            const latest = clusterHitRef.current.get(clusterId)
+            if (!latest) return
+            fitClusterInFreeSpace(map, latest.cluster)
+          }
+          requestAnimationFrame(() => run(12))
+        } else {
+          flyPinIntoView(map, entry.cluster.center, true, {
+            zoom: CLUSTER_FOCUS_ZOOM,
+            topPad: CLUSTER_POPUP_TOP_PAD,
+          })
+        }
         firstSelect.current = false
       })
 
@@ -1035,6 +1243,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
         bindPinHover(existing.button, incident.id)
         existing.button.onclick = event => {
           event.stopPropagation()
+          clusterFitTokenRef.current += 1
           suppressRestoreRef.current = true
           map.closePopup()
           openClusterIdRef.current = null
@@ -1055,6 +1264,7 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
       bindPinHover(button, incident.id)
       button.onclick = event => {
         event.stopPropagation()
+        clusterFitTokenRef.current += 1
         suppressRestoreRef.current = true
         map.closePopup()
         openClusterIdRef.current = null
@@ -1093,10 +1303,85 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
 
   // Selection highlight only — no marker teardown.
   useEffect(() => {
+    const order = new Map(dispatchOrder.map((id, index) => [id, index + 1]))
     for (const [id, entry] of markersRef.current) {
+      const number = order.get(id)
+      const focused = id === highlightedDispatchId
       entry.button.classList.toggle('chosen', id === selectedId)
+      entry.button.classList.toggle('on-dispatch', number != null)
+      entry.button.classList.toggle('dispatch-focus', focused)
+      entry.marker.setZIndexOffset(focused ? 1500 : number != null ? 400 : 0)
+      const host = entry.marker.getElement()
+      if (host) host.style.overflow = 'visible'
+      let badge = entry.button.querySelector('.dispatch-order-badge')
+      if (number == null) {
+        badge?.remove()
+        continue
+      }
+      if (!badge) {
+        badge = document.createElement('span')
+        badge.className = 'dispatch-order-badge'
+        entry.button.appendChild(badge)
+      }
+      badge.textContent = String(number)
     }
-  }, [selectedId, incidents])
+  }, [selectedId, incidents, dispatchOrder, highlightedDispatchId])
+
+  useEffect(() => {
+    const layer = deviceLayerRef.current
+    if (!layer) return
+    if (!devicePosition) {
+      layer.clearLayers()
+      deviceMarkerRef.current = null
+      return
+    }
+    if (deviceMarkerRef.current) {
+      deviceMarkerRef.current.setLatLng(devicePosition)
+      return
+    }
+    deviceMarkerRef.current = L.marker(devicePosition, {
+      icon: responderIcon(),
+      zIndexOffset: 1200,
+      keyboard: false,
+    }).addTo(layer)
+  }, [devicePosition])
+
+  useEffect(() => {
+    const layer = routeLayerRef.current
+    if (!layer) return
+    const signature = [
+      streetGraph ? 'map' : 'wait',
+      devicePosition ? `${devicePosition[0].toFixed(4)},${devicePosition[1].toFixed(4)}` : '',
+      dispatchStops.map(stop => `${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}`).join('|'),
+    ].join('~')
+    if (signature === routeSignatureRef.current) return
+    routeSignatureRef.current = signature
+    layer.clearLayers()
+    if (!streetGraph || !devicePosition || dispatchStops.length === 0) {
+      onDispatchEtasRef.current?.({})
+      return
+    }
+    const { path, minutesById } = routeDispatch(streetGraph, devicePosition, dispatchStops)
+    onDispatchEtasRef.current?.(minutesById)
+    if (path.length < 2) return
+    L.polyline(path, {
+      color: '#8de0af',
+      weight: 6,
+      opacity: 0.2,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    }).addTo(layer)
+    L.polyline(path, {
+      color: '#b8f2c5',
+      weight: 2.5,
+      opacity: 0.95,
+      dashArray: '8 9',
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    }).addTo(layer)
+  }, [devicePosition, dispatchStops, streetGraph])
 
   // Smooth pan when the selected report changes (not when only status updates).
   useEffect(() => {
@@ -1119,21 +1404,84 @@ export default function IncidentMap({ incidents, selectedId, onSelectIncident }:
     return () => window.cancelAnimationFrame(frame)
   }, [selectedId])
 
-  function fitIncidents() {
-    const points = incidents.flatMap(incident => {
-      const point = coordinates(incident)
-      return point ? [point] : []
-    })
-    if (!points.length || !mapRef.current) return
+  const dispatchFocusRef = useRef(dispatchFocus)
+  dispatchFocusRef.current = dispatchFocus
+  const dispatchStopsRef = useRef(dispatchStops)
+  dispatchStopsRef.current = dispatchStops
+  const devicePositionRef = useRef(devicePosition)
+  devicePositionRef.current = devicePosition
+
+  useEffect(() => {
+    const focus = dispatchFocusRef.current
     const map = mapRef.current
-    const left = leftChromeWidth(map)
-    map.fitBounds(L.latLngBounds(points).pad(0.15), {
-      paddingTopLeft: [left, 32],
-      paddingBottomRight: [32, 32],
+    if (!map || !focus) return
+    const entry = markersRef.current.get(focus.id)
+    const stop = dispatchStopsRef.current.find(item => item.id === focus.id)
+    const point = entry?.marker.getLatLng() ?? (stop ? L.latLng(stop.lat, stop.lon) : null)
+    if (!point) return
+    const frame = window.requestAnimationFrame(() => {
+      flyPinIntoView(map, point, true)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [dispatchFocus?.token])
+
+  function fitCoordinates(points: L.LatLngTuple[]) {
+    const map = mapRef.current
+    if (!map || !points.length) return
+    const { left, right } = focusInsets(map)
+    if (points.length === 1) {
+      flyPinIntoView(map, points[0], true, { zoom: 16, allowZoomOut: true })
+      return
+    }
+    map.fitBounds(L.latLngBounds(points).pad(0.2), {
+      paddingTopLeft: [left, 48],
+      paddingBottomRight: [right, 48],
       animate: true,
       duration: 0.35,
+      maxZoom: 16,
     })
   }
+
+  function fitIncidents() {
+    fitCoordinates(
+      incidents.flatMap(incident => {
+        const point = coordinates(incident)
+        return point ? [point] : []
+      }),
+    )
+  }
+
+  function routeCoordinates(): L.LatLngTuple[] {
+    const points: L.LatLngTuple[] = []
+    routeLayerRef.current?.eachLayer(layer => {
+      const polyline = layer as L.Polyline
+      if (typeof polyline.getLatLngs !== 'function') return
+      const latlngs = polyline.getLatLngs().flat(2) as L.LatLng[]
+      for (const latlng of latlngs) {
+        if (latlng && typeof latlng.lat === 'number') points.push([latlng.lat, latlng.lng])
+      }
+    })
+    return points
+  }
+
+  function fitDispatchRoute() {
+    const points = [
+      ...routeCoordinates(),
+      ...dispatchStopsRef.current.map(stop => [stop.lat, stop.lon] as L.LatLngTuple),
+    ]
+    const device = devicePositionRef.current
+    if (device) points.push(device)
+    fitCoordinates(points)
+  }
+
+  useEffect(() => {
+    if (!overviewToken) return
+    const frame = window.requestAnimationFrame(() => {
+      if (dispatchStopsRef.current.length) fitDispatchRoute()
+      else fitIncidents()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [overviewToken])
 
   return (
     <section className="panel map-panel geographic-panel" aria-label="Incident map">

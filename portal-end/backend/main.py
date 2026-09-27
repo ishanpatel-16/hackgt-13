@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 OFFLINE_SWEEP_INTERVAL = 5
 
 
-def _ensure_report_cluster_columns() -> None:
-    """Add cluster summary columns on existing SQLite DBs without a full migration."""
+def _ensure_report_columns() -> None:
+    """Add newer report columns on existing SQLite DBs without a full migration."""
     try:
         inspector = inspect(engine)
         columns = {column["name"] for column in inspector.get_columns("reports")}
@@ -53,16 +53,34 @@ def _ensure_report_cluster_columns() -> None:
     if "cluster_id" not in columns:
         statements.append("ALTER TABLE reports ADD COLUMN cluster_id VARCHAR(64)")
         statements.append("CREATE INDEX IF NOT EXISTS ix_reports_cluster_id ON reports (cluster_id)")
+    added_resolved = "resolved" not in columns
     if "cluster_summary" not in columns:
         statements.append("ALTER TABLE reports ADD COLUMN cluster_summary VARCHAR(600)")
     if "cluster_responders" not in columns:
         statements.append("ALTER TABLE reports ADD COLUMN cluster_responders JSON")
-    if not statements:
+    if added_resolved:
+        statements.append(
+            "ALTER TABLE reports ADD COLUMN resolved BOOLEAN NOT NULL DEFAULT 0"
+        )
+    if not statements and not added_resolved:
         return
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
-    logger.info("Added missing report cluster columns: %s", ", ".join(statements))
+        if added_resolved:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_reports_resolved ON reports (resolved)"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE reports SET resolved = 1 "
+                    "WHERE lower(status) IN ('resolved', 'closed')"
+                )
+            )
+    if statements:
+        logger.info("Added missing report columns: %s", ", ".join(statements))
 
 
 # -- fast api --
@@ -74,7 +92,7 @@ async def lifespan(app: FastAPI):
 
     # create sql tables
     Base.metadata.create_all(bind=engine)
-    _ensure_report_cluster_columns()
+    _ensure_report_columns()
 
     # Baseline clustering for existing reports (does not require Agent Mode).
     from ai.cluster import enqueue_baseline

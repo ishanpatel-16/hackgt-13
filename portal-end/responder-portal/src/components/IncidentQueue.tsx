@@ -22,6 +22,8 @@ interface Props {
   notice?: string | null
   emptyMessage?: string
   agentMode?: boolean
+  dispatchIds: string[]
+  onToggleDispatch: (id: string) => void
 }
 
 export default function IncidentQueue({
@@ -39,6 +41,8 @@ export default function IncidentQueue({
   notice = null,
   emptyMessage = 'No reports match these filters.',
   agentMode = false,
+  dispatchIds,
+  onToggleDispatch,
 }: Props) {
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(() => new Set())
   const [sort, setSort] = useState<IncidentSort>('arrival')
@@ -53,6 +57,11 @@ export default function IncidentQueue({
     () => sortGroups(groupByUser(filteredIncidents), agentMode ? 'priority' : sort),
     [agentMode, filteredIncidents, sort],
   )
+
+  useEffect(() => {
+    const feed = panelRef.current?.querySelector('.incident-feed')
+    if (feed) feed.scrollTop = 0
+  }, [sort])
 
   const selectedIncident = incidents.find(incident => incident.id === selectedId) ?? null
   const selectedUserId = selectedIncident?.userId
@@ -115,10 +124,10 @@ export default function IncidentQueue({
     }
   }, [selectedId, expandedUsers])
 
-  const peekGroup = peekUserId != null ? groups.find(g => g.userId === peekUserId) : undefined
+  const peekGroup = peekUserId != null ? groups.find(group => group.userId === peekUserId) : undefined
   const peekName =
     peekGroup?.userName ??
-    incidents.find(i => i.userId === peekUserId)?.userName
+    incidents.find(incident => incident.userId === peekUserId)?.userName
 
   function toggleUser(userId: number) {
     setExpandedUsers(current => {
@@ -141,13 +150,14 @@ export default function IncidentQueue({
                 <button
                   type="button"
                   className={`sort-toggle ${sortOpen ? 'open' : ''}`}
-                  aria-label="Sort incidents"
+                  aria-label={sort === 'priority' ? 'Sort incidents, currently priority' : 'Sort incidents, currently arrival time'}
                   aria-haspopup="menu"
                   aria-expanded={sortOpen}
-                  title="Sort"
+                  title={sort === 'priority' ? 'Sorted by priority' : 'Sorted by arrival time'}
                   onClick={() => setSortOpen(open => !open)}
                 >
                   <SortIcon />
+                  <span className="sort-current">{sort === 'priority' ? 'Priority' : 'Arrival'}</span>
                 </button>
                 {sortOpen && (
                   <div className="sort-dropdown" role="menu">
@@ -156,7 +166,9 @@ export default function IncidentQueue({
                       role="menuitemradio"
                       aria-checked={sort === 'arrival'}
                       className={sort === 'arrival' ? 'active' : ''}
-                      onClick={() => {
+                      onPointerDown={event => {
+                        event.preventDefault()
+                        event.stopPropagation()
                         setSort('arrival')
                         setSortOpen(false)
                       }}
@@ -168,7 +180,9 @@ export default function IncidentQueue({
                       role="menuitemradio"
                       aria-checked={sort === 'priority'}
                       className={sort === 'priority' ? 'active' : ''}
-                      onClick={() => {
+                      onPointerDown={event => {
+                        event.preventDefault()
+                        event.stopPropagation()
                         setSort('priority')
                         setSortOpen(false)
                       }}
@@ -211,6 +225,8 @@ export default function IncidentQueue({
                 selectedId={selectedId}
                 onToggle={() => toggleUser(group.userId)}
                 onSelectReport={onSelect}
+                dispatchIds={dispatchIds}
+                onToggleDispatch={onToggleDispatch}
                 onMessage={userId => onPeekUser(peekUserId === userId ? null : userId)}
                 messaging={peekUserId === group.userId}
               />
@@ -240,7 +256,9 @@ export default function IncidentQueue({
               <IncidentDetails
                 key={selectedIncident.id}
                 incident={selectedIncident}
+                inDispatch={dispatchIds.includes(selectedIncident.id)}
                 onAcknowledge={onAcknowledge}
+                onToggleDispatch={onToggleDispatch}
               />
             </div>
           </div>

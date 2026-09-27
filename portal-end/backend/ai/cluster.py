@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -79,6 +80,16 @@ def _apply_groups(
     reports: list[Report],
     clusters: list[dict[str, Any]],
 ) -> dict[str, list[Report]]:
+    # Re-read so a dispatch that landed during the Gemini call cannot be clustered
+    # or flipped back to unresolved by this session.
+    open_ids = [report.id for report in reports]
+    db.expire_all()
+    reports = (
+        _open_reports(db)
+        .filter(Report.id.in_(open_ids))
+        .order_by(Report.created_at.asc(), Report.id.asc())
+        .all()
+    ) if open_ids else []
     by_id = {report.id: report for report in reports}
     claimed: set[int] = set()
     output: dict[str, list[Report]] = {}
@@ -155,10 +166,15 @@ def _parse_clusters(raw: str, reports: list[Report]) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _open_reports(db: Session):
+    """Reports still in play. Resolved rows stay stored and are left out."""
+    return db.query(Report).filter(Report.resolved.is_(False))
+
+
 def load_clusters(db: Session) -> dict[str, list[Report]]:
     """Read persisted cluster assignments — no Gemini call."""
     reports = (
-        db.query(Report)
+        _open_reports(db)
         .filter(Report.cluster_id.isnot(None))
         .order_by(Report.created_at.asc(), Report.id.asc())
         .all()
@@ -174,12 +190,13 @@ def load_clusters(db: Session) -> dict[str, list[Report]]:
 
 def cluster_reports(db: Session) -> dict[str, list[Report]]:
     """
-    Recluster all reports with Gemini (writes cluster_id / summary / responders).
+    Recluster unresolved reports with Gemini (writes cluster_id / summary / responders).
+    Resolved reports stay in the database and are not sent to the model.
 
     Call only when the report set changes (new SOS / startup baseline).
     Prefer load_clusters() for reads.
     """
-    reports = db.query(Report).order_by(Report.created_at.asc(), Report.id.asc()).all()
+    reports = _open_reports(db).order_by(Report.created_at.asc(), Report.id.asc()).all()
     if not reports:
         return {}
 
@@ -209,6 +226,39 @@ def cluster_reports(db: Session) -> dict[str, list[Report]]:
         for group in _gps_fallback_groups(reports)
     ]
     return _apply_groups(db, reports, fallback)
+
+
+_recluster_state = threading.Lock()
+_recluster_pending = False
+
+
+def enqueue_recluster() -> None:
+    """Rebuild clusters from unresolved reports only.
+
+    Parallel dispatches share one refresh so every resolved report is excluded together.
+    """
+    global _recluster_pending
+    with _recluster_state:
+        if _recluster_pending:
+            return
+        _recluster_pending = True
+
+    def _run() -> None:
+        global _recluster_pending
+        time.sleep(0.5)
+        with _recluster_state:
+            _recluster_pending = False
+        from database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            cluster_reports(db)
+        except Exception:
+            logger.exception("Recluster after resolve failed")
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, daemon=True, name="recluster-open").start()
 
 
 def enqueue_baseline(msg_id: int | None = None) -> None:

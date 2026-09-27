@@ -28,9 +28,18 @@ export function useLivePortal() {
   const applyOverrides = useCallback((list: Incident[]): Incident[] => {
     const pending = overrides.current
     if (pending.size === 0) return list
+    const ids = new Set(list.map(item => item.id))
+    for (const [id, status] of pending) {
+      if (status === 'RESOLVED' && !ids.has(id)) pending.delete(id)
+    }
     return list.map(item => {
       const next = pending.get(item.id)
       if (!next) return item
+      if (next === 'RESOLVED') {
+        if (item.status === 'RESOLVED') pending.delete(item.id)
+        else return { ...item, status: 'RESOLVED' }
+        return item
+      }
       if (item.status !== 'NEW') {
         pending.delete(item.id)
         return item
@@ -97,5 +106,19 @@ export function useLivePortal() {
     }
   }, [refresh])
 
-  return { incidents, nodes, loading, error, link, acknowledge }
+  const resolveReports = useCallback(async (ids: string[]) => {
+    const numericIds = ids.map(Number).filter(id => Number.isFinite(id))
+    if (!numericIds.length) return
+    for (const id of ids) overrides.current.set(id, 'RESOLVED')
+    setIncidents(list => list.map(item => (ids.includes(item.id) ? { ...item, status: 'RESOLVED' } : item)))
+    try {
+      await Promise.all(numericIds.map(id => updateReport(id, { resolved: true, status: 'resolved' })))
+    } catch (err) {
+      for (const id of ids) overrides.current.delete(id)
+      setError(explain(err))
+      void refresh(true)
+    }
+  }, [refresh])
+
+  return { incidents, nodes, loading, error, link, acknowledge, resolveReports }
 }

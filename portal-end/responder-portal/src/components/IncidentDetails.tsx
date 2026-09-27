@@ -21,10 +21,14 @@ function coordinatesLabel(incident: Incident): string {
 
 export default function IncidentDetails({
   incident,
+  inDispatch = false,
   onAcknowledge,
+  onToggleDispatch,
 }: {
   incident: Incident
+  inDispatch?: boolean
   onAcknowledge: (id: string) => void
+  onToggleDispatch?: (id: string) => void
 }) {
   const now = useNow()
   const reported = formatRelativeTime(incident.arrivedAt, now)
@@ -156,13 +160,22 @@ export default function IncidentDetails({
           {incident.attempt ? <p className="field-note">Delivery attempt {incident.attempt}</p> : null}
         </section>
 
-        {isNew && (
-          <div className="detail-actions">
+        <div className="detail-actions">
+          {onToggleDispatch ? (
+            <button
+              type="button"
+              className={`dispatch-add-button ${inDispatch ? 'on' : ''}`}
+              onClick={() => onToggleDispatch(incident.id)}
+            >
+              {inDispatch ? 'In dispatch' : 'Add to dispatch'}
+            </button>
+          ) : null}
+          {isNew && (
             <button className="acknowledge-button" onClick={() => onAcknowledge(incident.id)}>
               Acknowledge
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </section>
   )

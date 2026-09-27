@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -40,6 +40,10 @@ class Report(Base):
     acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default="received")
+    # Kept in the database after dispatch. Open views, clustering, and summaries skip these.
+    resolved: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(), index=True
+    )
     ai_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_category: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)

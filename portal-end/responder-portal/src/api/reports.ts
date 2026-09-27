@@ -24,6 +24,7 @@ export interface ApiReport {
   location?: string | null
   message?: string | null
   status?: string | null
+  resolved?: boolean | null
   ai_priority?: number | null
   ai_category?: number | null
   ai_summary?: string | null
@@ -42,7 +43,7 @@ export function listReports(limit = 500, sort: 'created_at' | 'priority' = 'crea
 
 export function updateReport(
   id: number,
-  patch: { status?: string },
+  patch: { status?: string; resolved?: boolean },
 ): Promise<ApiReport> {
   return request(`/api/reports/${id}`, {
     method: 'PATCH',

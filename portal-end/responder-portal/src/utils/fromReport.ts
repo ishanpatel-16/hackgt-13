@@ -104,7 +104,7 @@ export function reportToIncident(report: ApiReport, roles: Map<number, number>):
     node: origin == null ? 'unassigned' : String(origin),
     arrivedAt: ensureUtcIso(report.created_at) ?? '',
     ackedAt: ensureUtcIso(report.acked_at),
-    status: mapStatus(report.status),
+    status: report.resolved ? 'RESOLVED' : mapStatus(report.status),
     location: locationText,
     placeName: locationText || undefined,
     report: report.message?.trim() ?? '',

@@ -5,15 +5,20 @@ import IncidentMap from './components/IncidentMap'
 import NavRail, { type AppView } from './components/NavRail'
 import MessagesView from './views/MessagesView'
 import AgentModeDock from './components/AgentModeDock'
+import DispatchDock from './components/DispatchDock'
 import { useLivePortal } from './hooks/useLivePortal'
-import type { AiResponder } from './types/incident'
+import { useDeviceLocation } from './hooks/useDeviceLocation'
+import type { AiResponder, Incident } from './types/incident'
 import type { AgentBrief, RescuePlan } from './types/agent'
 import { filterByResponders } from './utils/groupIncidents'
+import { sendMessage } from './api/messages'
+import { dispatchCode } from './utils/dispatchOrder'
+import { formatArrival, orderByLocation } from './utils/streetRoute'
 import { runAgent, sendAgentCheckIn, type AgentApiBrief, type AgentApiPlan } from './api/agent'
 import './App.css'
 
 function App() {
-  const { incidents, nodes, loading, error, link, acknowledge } = useLivePortal()
+  const { incidents, nodes, loading, error, link, acknowledge, resolveReports } = useLivePortal()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedFilters, setSelectedFilters] = useState<AiResponder[]>([])
   const [view, setView] = useState<AppView>('home')
@@ -24,19 +29,65 @@ function App() {
   const [agentBrief, setAgentBrief] = useState<AgentBrief | null>(null)
   const [agentLoading, setAgentLoading] = useState(false)
   const [agentStatus, setAgentStatus] = useState<'ok' | 'fallback' | null>(null)
+  const [dispatchIds, setDispatchIds] = useState<string[]>([])
+  const [orderNumber, setOrderNumber] = useState(1)
+  const [highlightedDispatchId, setHighlightedDispatchId] = useState<string | null>(null)
+  const [dispatchFocus, setDispatchFocus] = useState<{ id: string; token: number } | null>(null)
+  const [overviewToken, setOverviewToken] = useState(0)
+  const [dispatchEtas, setDispatchEtas] = useState<Record<string, number>>({})
+  const [dispatchNotice, setDispatchNotice] = useState<string | null>(null)
+  const devicePosition = useDeviceLocation()
+
+  const openIncidents = useMemo(
+    () => incidents.filter(incident => incident.status !== 'RESOLVED'),
+    [incidents],
+  )
 
   const filteredIncidents = useMemo(
-    () => filterByResponders(incidents, selectedFilters),
-    [incidents, selectedFilters],
+    () => filterByResponders(openIncidents, selectedFilters),
+    [openIncidents, selectedFilters],
   )
 
   const seedUsers = useMemo(() => {
     const map = new Map<number, string | undefined>()
-    for (const incident of incidents) {
+    for (const incident of openIncidents) {
       if (!map.has(incident.userId)) map.set(incident.userId, incident.userName)
     }
     return map
+  }, [openIncidents])
+
+  const dispatchIncidents = useMemo(() => {
+    const chosen = dispatchIds.flatMap(id => {
+      const incident = incidents.find(item => item.id === id)
+      return incident ? [incident] : []
+    })
+    const located = chosen.filter(hasFix)
+    const missing = chosen.filter(incident => !hasFix(incident))
+    const start = devicePosition
+      ? ([Number(devicePosition[0].toFixed(4)), Number(devicePosition[1].toFixed(4))] as [number, number])
+      : null
+    return [...orderByLocation(start, located), ...missing]
+  }, [devicePosition, dispatchIds, incidents])
+
+  const dispatchStops = useMemo(
+    () => dispatchIncidents.filter(hasFix).map(incident => ({ id: incident.id, lat: incident.lat, lon: incident.lon })),
+    [dispatchIncidents],
+  )
+
+  useEffect(() => {
+    if (!incidents.length) return
+    const live = new Set(incidents.map(incident => incident.id))
+    setDispatchIds(current => {
+      const next = current.filter(id => live.has(id))
+      return next.length === current.length ? current : next
+    })
   }, [incidents])
+
+  useEffect(() => {
+    if (!dispatchNotice) return
+    const timer = window.setTimeout(() => setDispatchNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [dispatchNotice])
 
   useEffect(() => {
     if (!agentMode) return
@@ -77,7 +128,7 @@ function App() {
     setSelectedFilters(next)
     setSelectedId(current => {
       if (current == null) return current
-      const visible = filterByResponders(incidents, next)
+      const visible = filterByResponders(openIncidents, next)
       if (visible.some(incident => incident.id === current)) return current
       return null
     })
@@ -99,11 +150,81 @@ function App() {
     }
   }
 
+  function releaseDispatchFocus(id: string) {
+    if (dispatchFocus?.id !== id) return
+    setDispatchFocus(null)
+    setHighlightedDispatchId(current => (current === id ? null : current))
+    setOverviewToken(token => token + 1)
+  }
+
+  function toggleDispatch(id: string) {
+    setDispatchIds(current => {
+      if (current.includes(id)) return current.filter(item => item !== id)
+      return [...current, id]
+    })
+    if (dispatchIds.includes(id)) releaseDispatchFocus(id)
+  }
+
+  function removeFromDispatch(id: string) {
+    setDispatchIds(current => current.filter(item => item !== id))
+    releaseDispatchFocus(id)
+  }
+
+  function focusDispatchStop(id: string) {
+    setHighlightedDispatchId(id)
+    setDispatchFocus(current => ({ id, token: (current?.token ?? 0) + 1 }))
+  }
+
+  function sendDispatch() {
+    const queued = dispatchIncidents
+    if (!queued.length) return
+    const etas = dispatchEtas
+    const code = dispatchCode(orderNumber)
+    const ids = queued.map(incident => incident.id)
+    setDispatchIds([])
+    setDispatchEtas({})
+    setHighlightedDispatchId(null)
+    setOrderNumber(number => number + 1)
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null)
+    void notifyDispatch(queued, etas, code)
+    void resolveReports(ids)
+  }
+
+  async function notifyDispatch(queued: Incident[], etas: Record<string, number>, code: string) {
+    const results = await Promise.all(
+      queued.map(async incident => {
+        const minutes = etas[incident.id]
+        const arrival =
+          minutes != null
+            ? ` Estimated arrival is about ${formatArrival(minutes)}.`
+            : ' Help is on the way.'
+        const text = `Dispatch #${code} sent for your ${incident.type.toLowerCase()} report.${arrival}`
+        try {
+          await sendMessage({
+            user_id: incident.userId,
+            text,
+            sender: 'Portal',
+            reply_to: incident.msgId,
+          })
+          return true
+        } catch {
+          return false
+        }
+      }),
+    )
+    const failed = results.filter(ok => !ok).length
+    setDispatchNotice(
+      failed
+        ? `Dispatch sent. ${failed} ${failed === 1 ? 'notification failed' : 'notifications failed'}.`
+        : 'Dispatch sent. Each person was told help is on the way.',
+    )
+  }
+
   function toggleAgentMode() {
     setAgentMode(current => {
       const next = !current
-      if (next && selectedId == null && incidents.length > 0) {
-        const highestPriority = [...incidents].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]
+      if (next && selectedId == null && openIncidents.length > 0) {
+        const highestPriority = [...openIncidents].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]
         setSelectedId(highestPriority.id)
       }
       return next
@@ -111,7 +232,7 @@ function App() {
   }
 
   const emptyMessage =
-    incidents.length > 0
+    openIncidents.length > 0
       ? 'No reports match these filters.'
       : error
         ? error
@@ -128,7 +249,7 @@ function App() {
           {view === 'home' ? (
             <div className="workspace">
               <IncidentQueue
-                incidents={incidents}
+                incidents={openIncidents}
                 filteredIncidents={filteredIncidents}
                 selectedFilters={selectedFilters}
                 onFiltersChange={changeFilters}
@@ -141,44 +262,72 @@ function App() {
                 peekUserId={peekUserId}
                 onPeekUser={setPeekUserId}
                 onOpenMessages={openMessages}
-                notice={error && incidents.length > 0 ? error : null}
+                notice={dispatchNotice ?? (error && openIncidents.length > 0 ? error : null)}
                 emptyMessage={emptyMessage}
                 agentMode={agentMode}
+                dispatchIds={dispatchIds}
+                onToggleDispatch={toggleDispatch}
               />
               <IncidentMap
                 incidents={filteredIncidents}
                 selectedId={selectedId}
                 onSelectIncident={selectIncident}
+                onClearSelection={() => setSelectedId(null)}
+                devicePosition={devicePosition}
+                dispatchStops={dispatchStops}
+                dispatchOrder={dispatchIncidents.map(incident => incident.id)}
+                highlightedDispatchId={highlightedDispatchId}
+                dispatchFocus={dispatchFocus}
+                overviewToken={overviewToken}
+                onDispatchEtas={setDispatchEtas}
               />
             </div>
           ) : (
             <MessagesView
-              incidents={incidents}
+              incidents={openIncidents}
               selectedUserId={messagesUserId}
               onSelectUser={setMessagesUserId}
             />
           )}
         </main>
       </div>
-      <AgentModeDock
-        active={agentMode}
-        incidents={incidents}
-        selectedId={selectedId}
-        nodes={nodes}
-        plan={agentPlan}
-        brief={agentBrief}
-        loading={agentLoading}
-        runStatus={agentStatus}
-        onToggle={toggleAgentMode}
-        onApproveCheckIn={async (reportId, text) => {
-          const result = await sendAgentCheckIn(reportId, text)
-          const targetIncident = incidents.find(incident => incident.id === String(reportId))
-          if (targetIncident) setMessagesUserId(targetIncident.userId)
-          return result.status
-        }}
-      />
+      <div className="corner-stack">
+        <AgentModeDock
+          active={agentMode}
+          incidents={openIncidents}
+          selectedId={selectedId}
+          nodes={nodes}
+          plan={agentPlan}
+          brief={agentBrief}
+          loading={agentLoading}
+          runStatus={agentStatus}
+          onToggle={toggleAgentMode}
+          onApproveCheckIn={async (reportId, text) => {
+            const result = await sendAgentCheckIn(reportId, text)
+            const targetIncident = incidents.find(incident => incident.id === String(reportId))
+            if (targetIncident) setMessagesUserId(targetIncident.userId)
+            return result.status
+          }}
+        />
+        {dispatchIncidents.length > 0 ? (
+          <DispatchDock
+            orderNumber={orderNumber}
+            incidents={dispatchIncidents}
+            hasDeviceFix={devicePosition != null}
+            etas={dispatchEtas}
+            onRemove={removeFromDispatch}
+            onSend={sendDispatch}
+            onHighlight={setHighlightedDispatchId}
+            onFocus={focusDispatchStop}
+          />
+        ) : null}
+      </div>
     </div>
   )
+}
+
+function hasFix(incident: Incident): incident is Incident & { lat: number; lon: number } {
+  return incident.lat != null && incident.lon != null && Number.isFinite(incident.lat) && Number.isFinite(incident.lon)
 }
 
 export default App

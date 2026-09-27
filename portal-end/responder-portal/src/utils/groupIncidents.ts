@@ -42,7 +42,14 @@ function newestTimestamp(reports: Incident[]): string {
   }, reports[0]?.arrivedAt ?? '')
 }
 
-/** Group filtered incidents by userId. */
+/** Newest report first. This order stays fixed when the queue sort changes. */
+function compareReports(a: Incident, b: Incident): number {
+  const timeDelta = timeMs(b.arrivedAt) - timeMs(a.arrivedAt)
+  if (timeDelta !== 0) return timeDelta
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+/** Group filtered incidents by userId. Reports stay in arrival order inside the group. */
 export function groupByUser(incidents: Incident[]): UserIncidentGroup[] {
   const map = new Map<number, Incident[]>()
   for (const incident of incidents) {
@@ -53,13 +60,10 @@ export function groupByUser(incidents: Incident[]): UserIncidentGroup[] {
 
   const groups: UserIncidentGroup[] = []
   for (const [userId, reports] of map) {
-    const sortedReports = [...reports].sort(
-      (a, b) => new Date(b.arrivedAt).getTime() - new Date(a.arrivedAt).getTime(),
-    )
     groups.push({
       userId,
       userName: reports.find(r => r.userName)?.userName,
-      reports: sortedReports,
+      reports: [...reports].sort(compareReports),
       newestArrivedAt: newestTimestamp(reports),
       maxPriority: maxPriorityOf(reports),
       hasNew: reports.some(r => r.status === 'NEW'),
@@ -70,17 +74,26 @@ export function groupByUser(incidents: Incident[]): UserIncidentGroup[] {
   return groups
 }
 
+/**
+ * Order people, not the reports inside them.
+ * Arrival: latest report first.
+ * Priority: highest overall priority first. Same priority means the older last
+ * report comes first, so the two sorts do not collapse into one list.
+ */
 export function sortGroups(groups: UserIncidentGroup[], sort: IncidentSort): UserIncidentGroup[] {
   const copy = [...groups]
-  if (sort === 'priority') {
-    copy.sort((a, b) => {
-      const priorityDelta = (b.maxPriority ?? 0) - (a.maxPriority ?? 0)
+  copy.sort((a, b) => {
+    const priorityDelta = (b.maxPriority ?? 0) - (a.maxPriority ?? 0)
+    const timeDelta = timeMs(b.newestArrivedAt) - timeMs(a.newestArrivedAt)
+    if (sort === 'priority') {
       if (priorityDelta !== 0) return priorityDelta
-      return timeMs(b.newestArrivedAt) - timeMs(a.newestArrivedAt)
-    })
-  } else {
-    copy.sort((a, b) => timeMs(b.newestArrivedAt) - timeMs(a.newestArrivedAt))
-  }
+      if (timeDelta !== 0) return -timeDelta
+    } else {
+      if (timeDelta !== 0) return timeDelta
+      if (priorityDelta !== 0) return priorityDelta
+    }
+    return a.userId - b.userId
+  })
   return copy
 }
 
