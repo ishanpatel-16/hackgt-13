@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define NET0_MAGIC    0x4E30  // "N0" — anything else is dropped
-#define NET0_VERSION  6       // v6: user_reply + message (target field)
+#define NET0_VERSION  7       // v7: reports carry the sender name
 
 // Packet types. Same numbers as the backend (portal-end/backend/packet_codec.py)
 // so a type means the same thing on the mesh and over Bluetooth.
@@ -21,6 +21,7 @@
 #define DEFAULT_TTL   6
 #define MAX_PATH      8
 #define LOCATION_LEN  64
+#define NAME_LEN      32      // reports: sender name (backend NAME_MAX)
 #define MESSAGE_LEN   400
 
 #define WIFI_CHANNEL  6       // AP and ESP-NOW must share one channel on every board
@@ -63,6 +64,7 @@ typedef struct __attribute__((packed)) {
   uint16_t accuracy_m;            // phone's estimate of how far off the fix may be
   uint8_t  path_len;
   uint8_t  path[MAX_PATH];        // node IDs visited, in order
+  char     name[NAME_LEN];          // reports: name typed on the phone
   char     location[LOCATION_LEN];  // reports: typed location; message: sender name
   char     message[MESSAGE_LEN];    // report details / user_reply text / message text
 } Packet;

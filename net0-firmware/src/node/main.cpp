@@ -72,6 +72,7 @@ uint32_t nodeSendReport(const ReportInfo &r) {
   p.lat = r.gps.lat;
   p.lon = r.gps.lon;
   p.accuracy_m = r.gps.accuracy_m;
+  strlcpy(p.name, r.name, NAME_LEN);
   strlcpy(p.location, r.location, LOCATION_LEN);
   strlcpy(p.message, r.message, MESSAGE_LEN);
 

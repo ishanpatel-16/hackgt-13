@@ -205,7 +205,9 @@ async function post(url, body, button, errId) {
   }
 }
 
+// Remembered so the next report (or a reload) doesn't ask again.
 const civilianName = $("civilian-name");
+civilianName.value = ls("net0_name") || "";
 civilianName.addEventListener("input", () => civilianName.setCustomValidity(""));
 
 $("send-sos").addEventListener("click", async () => {
@@ -219,8 +221,10 @@ $("send-sos").addEventListener("click", async () => {
     showMsg("emergency-message", "Please describe the issue.");
     return details.focus();
   }
+  ls("net0_name", civilianName.value.trim());
   const body = {
     id: userId,
+    name: civilianName.value.trim(),
     category: CATEGORY[state.emergency],
     people: state.people,
     location: $("location").value.trim(),

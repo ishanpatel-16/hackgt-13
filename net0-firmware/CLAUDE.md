@@ -45,11 +45,11 @@ Phone → Node (Wi-Fi AP + web form) → other Node(s) relaying → Gateway ESP3
 - **ESP-NOW receive callback:** only copy the packet into a FreeRTOS queue. Process it in `loop()`. Never do slow work (Serial, delays, sends) inside the callback.
 - **Callback signature (core 3.x):** `void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len)`. RSSI comes from `info->rx_ctrl->rssi`.
 
-## Packet (`include/packet.h`, packed struct, version 6)
+## Packet (`include/packet.h`, packed struct, version 7)
 | Field | Type | Notes |
 |---|---|---|
 | magic | uint16 | `0x4E30`, drop anything else |
-| version | uint8 | `6` (every board must run the same version) |
+| version | uint8 | `7` (every board must run the same version) |
 | type | uint8 | `1` = report, `2` = user_reply, `3` = heartbeat, `4` = ack, `5` = message. **Same numbers as the backend's `packet_codec.py`.** |
 | msg_id | uint32 | random, never 0. **Same on every retry of a report / user_reply / message** |
 | attempt | uint8 | 0 = first send, +1 per retry |
@@ -63,6 +63,7 @@ Phone → Node (Wi-Fi AP + web form) → other Node(s) relaying → Gateway ESP3
 | people | uint8 | reports: people needing help (0 = unknown) |
 | has_gps, lat, lon, accuracy_m | uint8, float, float, uint16 | reports: phone GPS fix (HTTPS page only) |
 | path_len, path[8] | uint8 | node IDs the packet passed through, in order |
+| name | char[32] | report: name typed on the phone (saved as the user's name in the backend) |
 | location | char[64] | report: user-typed location; message: sender name (≤ 31 chars) |
 | message | char[400] | report details / user_reply text / message text |
 
