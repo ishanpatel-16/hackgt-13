@@ -472,34 +472,80 @@ function applyHeatBuckets(
   signatureRef.current = signature
 }
 
-function clusterIncidents(incidents: Incident[]): IncidentCluster[] {
-  const groups = new Map<string, { incidents: Incident[]; points: L.LatLngTuple[] }>()
-  incidents.forEach(incident => {
+/** Same cap as the backend: a cluster may not span more than about one block. */
+const MAX_CLUSTER_DIAMETER_M = 150
+
+function splitTightIncidents(incidents: Incident[]): Incident[][] {
+  const placed = incidents.flatMap(incident => {
     const point = coordinates(incident)
-    if (!point || !incident.clusterId) return
-    const existing = groups.get(incident.clusterId)
-    if (existing) {
-      existing.incidents.push(incident)
-      existing.points.push(point)
-    } else {
-      groups.set(incident.clusterId, { incidents: [incident], points: [point] })
+    return point ? [{ incident, point }] : []
+  })
+  if (placed.length < 2) return []
+
+  let clusters = placed.map(item => [item])
+  const link = (left: typeof placed, right: typeof placed) => {
+    let farthest = 0
+    for (const a of left) {
+      for (const b of right) farthest = Math.max(farthest, distanceMeters(a.point, b.point))
     }
+    return farthest
+  }
+
+  while (true) {
+    let bestI = -1
+    let bestJ = -1
+    let bestGap = Infinity
+    for (let i = 0; i < clusters.length; i += 1) {
+      for (let j = i + 1; j < clusters.length; j += 1) {
+        const gap = link(clusters[i], clusters[j])
+        if (gap <= MAX_CLUSTER_DIAMETER_M && gap < bestGap) {
+          bestGap = gap
+          bestI = i
+          bestJ = j
+        }
+      }
+    }
+    if (bestI < 0) break
+    clusters[bestI] = clusters[bestI].concat(clusters[bestJ])
+    clusters.splice(bestJ, 1)
+  }
+
+  return clusters.filter(group => group.length >= 2).map(group => group.map(item => item.incident))
+}
+
+function clusterIncidents(incidents: Incident[]): IncidentCluster[] {
+  const groups = new Map<string, Incident[]>()
+  incidents.forEach(incident => {
+    if (!coordinates(incident) || !incident.clusterId) return
+    const existing = groups.get(incident.clusterId)
+    if (existing) existing.push(incident)
+    else groups.set(incident.clusterId, [incident])
   })
 
-  return [...groups.entries()]
-    .filter(([, group]) => group.incidents.length > 1)
-    .map(([id, group]) => {
+  const clusters: IncidentCluster[] = []
+  for (const [id, members] of groups) {
+    const parts = splitTightIncidents(members)
+    parts.forEach(part => {
+      const points = part.flatMap(incident => {
+        const point = coordinates(incident)
+        return point ? [point] : []
+      })
+      if (points.length < 2) return
       const center: L.LatLngTuple = [
-        group.points.reduce((sum, point) => sum + point[0], 0) / group.points.length,
-        group.points.reduce((sum, point) => sum + point[1], 0) / group.points.length,
+        points.reduce((sum, point) => sum + point[0], 0) / points.length,
+        points.reduce((sum, point) => sum + point[1], 0) / points.length,
       ]
-      return {
-        id,
-        incidents: group.incidents,
+      const spread = Math.max(...points.map(point => distanceMeters(center, point)))
+      const partId = parts.length === 1 ? id : `${id}:${part.map(incident => incident.id).sort()[0]}`
+      clusters.push({
+        id: partId,
+        incidents: part,
         center,
-        radius: Math.max(100, Math.min(300, Math.max(...group.points.map(point => distanceMeters(center, point))) + 75)),
-      }
+        radius: Math.max(100, Math.min(300, spread + 75)),
+      })
     })
+  }
+  return clusters
 }
 
 function escapeHtml(value: string): string {

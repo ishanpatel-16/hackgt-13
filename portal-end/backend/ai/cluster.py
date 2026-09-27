@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import time
 from typing import Any
@@ -25,8 +26,9 @@ VALID_RESPONDERS = {
     "coast_guard",
 }
 
-# Rough campus-scale proximity (~330m) used only if Gemini is unavailable.
-_GPS_CLUSTER_DEG = 0.003
+# Hard cap on how far a cluster may spread. Complete-linkage, so a chain of
+# "nearby" reports cannot walk across several blocks. ~150m is about one block.
+_MAX_CLUSTER_DIAMETER_M = 150.0
 
 
 def _category_name(code: int | None) -> str:
@@ -53,26 +55,84 @@ def _report_payload(report: Report) -> dict[str, Any]:
     }
 
 
-def _gps_close(left: Report, right: Report) -> bool:
-    if left.gps_lat is None or left.gps_lon is None or right.gps_lat is None or right.gps_lon is None:
-        return False
-    return (
-        abs(left.gps_lat - right.gps_lat) <= _GPS_CLUSTER_DEG
-        and abs(left.gps_lon - right.gps_lon) <= _GPS_CLUSTER_DEG
-    )
+def _meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    lat_scale = 111_000.0
+    lon_scale = 111_000.0 * math.cos(math.radians((lat1 + lat2) / 2.0))
+    return math.hypot((lat1 - lat2) * lat_scale, (lon1 - lon2) * lon_scale)
+
+
+def _split_tight(reports: list[Report]) -> list[list[Report]]:
+    """Group reports so the farthest pair in each group stays within the diameter cap.
+
+    Reports without GPS are left out — a heatmap cluster has to sit on a real spot.
+    Singletons are dropped; callers only keep areas with multiple nearby incidents.
+    """
+    placed = [report for report in reports if report.gps_lat is not None and report.gps_lon is not None]
+    if len(placed) < 2:
+        return []
+
+    clusters: list[list[Report]] = [[report] for report in placed]
+
+    def link(left: list[Report], right: list[Report]) -> float:
+        farthest = 0.0
+        for left_report in left:
+            for right_report in right:
+                lat1, lon1 = left_report.gps_lat, left_report.gps_lon
+                lat2, lon2 = right_report.gps_lat, right_report.gps_lon
+                if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+                    continue
+                farthest = max(farthest, _meters(lat1, lon1, lat2, lon2))
+        return farthest
+
+    while True:
+        best_i = -1
+        best_j = -1
+        best_gap: float | None = None
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                gap = link(clusters[i], clusters[j])
+                if gap <= _MAX_CLUSTER_DIAMETER_M and (best_gap is None or gap < best_gap):
+                    best_gap = gap
+                    best_i, best_j = i, j
+        if best_i < 0:
+            break
+        clusters[best_i].extend(clusters[best_j])
+        del clusters[best_j]
+
+    return [group for group in clusters if len(group) >= 2]
+
+
+def _constrain_cluster_size(clusters: list[dict[str, Any]], reports: list[Report]) -> list[dict[str, Any]]:
+    """Break any proposed cluster that covers more than a small area.
+
+    A group that already fits keeps its summary and responder list. A group that
+    has to be split drops that shared summary — it described the oversized area.
+    """
+    by_id = {report.id: report for report in reports}
+    tightened: list[dict[str, Any]] = []
+    for cluster in clusters:
+        members = [by_id[report_id] for report_id in cluster.get("report_ids") or [] if report_id in by_id]
+        parts = _split_tight(members)
+        gps_ids = {
+            report.id
+            for report in members
+            if report.gps_lat is not None and report.gps_lon is not None
+        }
+        intact = len(parts) == 1 and {report.id for report in parts[0]} == gps_ids and len(gps_ids) >= 2
+        for part in parts:
+            tightened.append(
+                {
+                    "report_ids": [report.id for report in part],
+                    "summary": cluster.get("summary") if intact else None,
+                    "responders": (cluster.get("responders") or []) if intact else [],
+                }
+            )
+    return tightened
 
 
 def _gps_fallback_groups(reports: list[Report]) -> list[list[Report]]:
     """Deterministic proximity grouping when Gemini is unavailable — not narrative AI."""
-    with_gps = [report for report in reports if report.gps_lat is not None and report.gps_lon is not None]
-    groups: list[list[Report]] = []
-    for report in with_gps:
-        match = next((group for group in groups if any(_gps_close(report, other) for other in group)), None)
-        if match is None:
-            groups.append([report])
-        else:
-            match.append(report)
-    return [group for group in groups if len(group) >= 2]
+    return _split_tight(reports)
 
 
 def _apply_groups(
@@ -188,6 +248,34 @@ def load_clusters(db: Session) -> dict[str, list[Report]]:
     return {cluster_id: members for cluster_id, members in groups.items() if len(members) >= 2}
 
 
+def tighten_stored_clusters(db: Session) -> dict[str, list[Report]]:
+    """Re-split clusters already saved in the database. Does not call Gemini."""
+    reports = (
+        _open_reports(db)
+        .filter(Report.cluster_id.isnot(None))
+        .order_by(Report.created_at.asc(), Report.id.asc())
+        .all()
+    )
+    by_cluster: dict[str, list[Report]] = {}
+    for report in reports:
+        if not report.cluster_id:
+            continue
+        by_cluster.setdefault(report.cluster_id, []).append(report)
+
+    payloads: list[dict[str, Any]] = []
+    for members in by_cluster.values():
+        summary = next((report.cluster_summary for report in members if report.cluster_summary), None)
+        responders = next((report.cluster_responders for report in members if report.cluster_responders), None)
+        payloads.append(
+            {
+                "report_ids": [report.id for report in members],
+                "summary": summary,
+                "responders": list(responders or []),
+            }
+        )
+    return _apply_groups(db, reports, _constrain_cluster_size(payloads, reports))
+
+
 def cluster_reports(db: Session) -> dict[str, list[Report]]:
     """
     Recluster unresolved reports with Gemini (writes cluster_id / summary / responders).
@@ -211,7 +299,7 @@ def cluster_reports(db: Session) -> dict[str, list[Report]]:
 
     if raw:
         try:
-            clusters = _parse_clusters(raw, reports)
+            clusters = _constrain_cluster_size(_parse_clusters(raw, reports), reports)
             return _apply_groups(db, reports, clusters)
         except Exception:
             logger.exception("Failed to parse Gemini clustering response; using GPS proximity fallback")
